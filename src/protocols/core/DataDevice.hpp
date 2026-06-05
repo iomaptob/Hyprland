@@ -8,7 +8,6 @@
      - wl_data_device_manager
 */
 
-#include <memory>
 #include <vector>
 #include <cstdint>
 #include "../WaylandProtocol.hpp"
@@ -16,7 +15,9 @@
 #include "wayland.hpp"
 #include "../../helpers/signal/Signal.hpp"
 #include "../../helpers/math/Math.hpp"
+#include "../../helpers/time/Time.hpp"
 #include "../types/DataDevice.hpp"
+#include <hyprutils/os/FileDescriptor.hpp>
 
 class CWLDataDeviceResource;
 class CWLDataDeviceManagerResource;
@@ -26,25 +27,28 @@ class CWLDataOfferResource;
 class CWLSurfaceResource;
 class CMonitor;
 
-class CWLDataOfferResource {
+class CWLDataOfferResource : public IDataOffer {
   public:
     CWLDataOfferResource(SP<CWlDataOffer> resource_, SP<IDataSource> source_);
     ~CWLDataOfferResource();
 
-    bool            good();
-    void            sendData();
+    bool                             good();
+    void                             sendData();
 
-    WP<IDataSource> source;
+    virtual eDataSourceType          type();
+    virtual SP<CWLDataOfferResource> getWayland();
+    virtual SP<CX11DataOffer>        getX11();
+    virtual SP<IDataSource>          getSource();
 
-    bool            dead     = false;
-    bool            accepted = false;
-    bool            recvd    = false;
+    WP<IDataSource>                  m_source;
+    WP<CWLDataOfferResource>         m_self;
 
-    uint32_t        actions = 0;
+    bool                             m_dead     = false;
+    bool                             m_accepted = false;
+    bool                             m_recvd    = false;
 
   private:
-    SP<CWlDataOffer> resource;
-    wl_client*       pClient = nullptr;
+    SP<CWlDataOffer> m_resource;
 
     friend class CWLDataDeviceResource;
 };
@@ -58,7 +62,7 @@ class CWLDataSourceResource : public IDataSource {
     bool                             good();
 
     virtual std::vector<std::string> mimes();
-    virtual void                     send(const std::string& mime, uint32_t fd);
+    virtual void                     send(const std::string& mime, Hyprutils::OS::CFileDescriptor fd);
     virtual void                     accepted(const std::string& mime);
     virtual void                     cancelled();
     virtual bool                     hasDnd();
@@ -66,47 +70,51 @@ class CWLDataSourceResource : public IDataSource {
     virtual void                     error(uint32_t code, const std::string& msg);
     virtual void                     sendDndFinished();
     virtual uint32_t                 actions(); // wl_data_device_manager.dnd_action
+    virtual eDataSourceType          type();
+    virtual void                     sendDndDropPerformed();
+    virtual void                     sendDndAction(wl_data_device_manager_dnd_action a);
 
-    void                             sendDndDropPerformed();
-    void                             sendDndAction(wl_data_device_manager_dnd_action a);
+    bool                             m_used       = false;
+    bool                             m_dnd        = false;
+    bool                             m_dndSuccess = false;
+    bool                             m_dropped    = false;
 
-    bool                             used       = false;
-    bool                             dnd        = false;
-    bool                             dndSuccess = false;
-    bool                             dropped    = false;
+    WP<CWLDataDeviceResource>        m_device;
+    WP<CWLDataSourceResource>        m_self;
 
-    WP<CWLDataDeviceResource>        device;
-    WP<CWLDataSourceResource>        self;
-
-    std::vector<std::string>         mimeTypes;
-    uint32_t                         supportedActions = 0;
+    std::vector<std::string>         m_mimeTypes;
+    uint32_t                         m_supportedActions = 0;
 
   private:
-    SP<CWlDataSource> resource;
-    wl_client*        pClient = nullptr;
+    SP<CWlDataSource> m_resource;
 
     friend class CWLDataDeviceProtocol;
 };
 
-class CWLDataDeviceResource {
+class CWLDataDeviceResource : public IDataDevice {
   public:
     CWLDataDeviceResource(SP<CWlDataDevice> resource_);
 
-    bool                      good();
-    wl_client*                client();
+    bool                              good();
+    wl_client*                        client();
 
-    void                      sendDataOffer(SP<CWLDataOfferResource> offer);
-    void                      sendEnter(uint32_t serial, SP<CWLSurfaceResource> surf, const Vector2D& local, SP<CWLDataOfferResource> offer);
-    void                      sendLeave();
-    void                      sendMotion(uint32_t timeMs, const Vector2D& local);
-    void                      sendDrop();
-    void                      sendSelection(SP<CWLDataOfferResource> offer);
+    virtual SP<CWLDataDeviceResource> getWayland();
+    virtual SP<CX11DataDevice>        getX11();
+    virtual void                      sendDataOffer(SP<IDataOffer> offer);
+    virtual void                      sendEnter(uint32_t serial, SP<CWLSurfaceResource> surf, const Vector2D& local, SP<IDataOffer> offer);
+    virtual void                      sendLeave();
+    virtual void                      sendMotion(uint32_t timeMs, const Vector2D& local);
+    virtual void                      sendDrop();
+    virtual void                      sendSelection(SP<IDataOffer> offer);
+    virtual eDataSourceType           type();
 
-    WP<CWLDataDeviceResource> self;
+    WP<CWLDataDeviceResource>         m_self;
 
   private:
-    SP<CWlDataDevice> resource;
-    wl_client*        pClient = nullptr;
+    SP<CWlDataDevice>      m_resource;
+    wl_client*             m_client = nullptr;
+
+    WP<CWLSurfaceResource> m_entered;
 
     friend class CWLDataDeviceProtocol;
 };
@@ -117,11 +125,11 @@ class CWLDataDeviceManagerResource {
 
     bool                                   good();
 
-    WP<CWLDataDeviceResource>              device;
-    std::vector<WP<CWLDataSourceResource>> sources;
+    WP<CWLDataDeviceResource>              m_device;
+    std::vector<WP<CWLDataSourceResource>> m_sources;
 
   private:
-    SP<CWlDataDeviceManager> resource;
+    SP<CWlDataDeviceManager> m_resource;
 };
 
 class CWLDataDeviceProtocol : public IWaylandProtocol {
@@ -131,10 +139,13 @@ class CWLDataDeviceProtocol : public IWaylandProtocol {
     virtual void bindManager(wl_client* client, void* data, uint32_t ver, uint32_t id);
 
     // renders and damages the dnd icon, if present
-    void renderDND(CMonitor* pMonitor, timespec* when);
+    void renderDND(PHLMONITOR pMonitor, const Time::steady_tp& when);
     // for inputmgr to force refocus
     // TODO: move handling to seatmgr
     bool dndActive();
+
+    // called on an escape key pressed, for moments where it gets stuck
+    void abortDndIfPresent();
 
   private:
     void destroyResource(CWLDataDeviceManagerResource* resource);
@@ -143,45 +154,47 @@ class CWLDataDeviceProtocol : public IWaylandProtocol {
     void destroyResource(CWLDataOfferResource* resource);
 
     //
-    std::vector<SP<CWLDataDeviceManagerResource>> m_vManagers;
-    std::vector<SP<CWLDataDeviceResource>>        m_vDevices;
-    std::vector<SP<CWLDataSourceResource>>        m_vSources;
-    std::vector<SP<CWLDataOfferResource>>         m_vOffers;
+    std::vector<SP<CWLDataDeviceManagerResource>> m_managers;
+    std::vector<SP<CWLDataDeviceResource>>        m_devices;
+    std::vector<SP<CWLDataSourceResource>>        m_sources;
+    std::vector<SP<CWLDataOfferResource>>         m_offers;
 
     //
 
     void onDestroyDataSource(WP<CWLDataSourceResource> source);
     void setSelection(SP<IDataSource> source);
-    void sendSelectionToDevice(SP<CWLDataDeviceResource> dev, SP<IDataSource> sel);
+    void sendSelectionToDevice(SP<IDataDevice> dev, SP<IDataSource> sel);
     void updateSelection();
     void onKeyboardFocus();
+    void onDndPointerFocus();
 
     struct {
-        WP<CWLDataDeviceResource> focusedDevice;
-        WP<CWLDataSourceResource> currentSource;
-        WP<CWLSurfaceResource>    dndSurface;
-        WP<CWLSurfaceResource>    originSurface;
-        bool                      overriddenCursor = false;
-        CHyprSignalListener       dndSurfaceDestroy;
-        CHyprSignalListener       dndSurfaceCommit;
+        WP<IDataDevice>        focusedDevice;
+        WP<IDataSource>        currentSource;
+        WP<CWLSurfaceResource> dndSurface;
+        WP<CWLSurfaceResource> originSurface;
+        bool                   overriddenCursor = false;
+        CHyprSignalListener    dndSurfaceDestroy;
+        CHyprSignalListener    dndSurfaceCommit;
 
         // for ending a dnd
-        SP<HOOK_CALLBACK_FN> mouseMove;
-        SP<HOOK_CALLBACK_FN> mouseButton;
-        SP<HOOK_CALLBACK_FN> touchUp;
-        SP<HOOK_CALLBACK_FN> touchMove;
-    } dnd;
+        CHyprSignalListener mouseMove;
+        CHyprSignalListener mouseButton;
+        CHyprSignalListener touchUp;
+        CHyprSignalListener touchMove;
+        CHyprSignalListener tabletTip;
+    } m_dnd;
 
     void abortDrag();
     void initiateDrag(WP<CWLDataSourceResource> currentSource, SP<CWLSurfaceResource> dragSurface, SP<CWLSurfaceResource> origin);
     void updateDrag();
     void dropDrag();
     void completeDrag();
-    void resetDndState();
+    void cleanupDndState(bool resetDevice, bool resetSource, bool simulateInput);
     bool wasDragSuccessful();
 
     //
-    SP<CWLDataDeviceResource> dataDeviceForClient(wl_client*);
+    SP<IDataDevice> dataDeviceForClient(wl_client*);
 
     friend class CSeatManager;
     friend class CWLDataDeviceManagerResource;
@@ -191,7 +204,8 @@ class CWLDataDeviceProtocol : public IWaylandProtocol {
 
     struct {
         CHyprSignalListener onKeyboardFocusChange;
-    } listeners;
+        CHyprSignalListener onDndPointerFocusChange;
+    } m_listeners;
 };
 
 namespace PROTO {

@@ -9,48 +9,44 @@
 #include <sys/un.h>
 #include <unistd.h>
 #include <cstring>
+using namespace Hyprutils::OS;
 
-CEventManager::CEventManager() {
-    m_iSocketFD = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
-    if (m_iSocketFD < 0) {
-        Debug::log(ERR, "Couldn't start the Hyprland Socket 2. (1) IPC will not work.");
+CEventManager::CEventManager() : m_socketFD(socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0)) {
+    if (!m_socketFD.isValid()) {
+        Log::logger->log(Log::ERR, "Couldn't start the Hyprland Socket 2. (1) IPC will not work.");
         return;
     }
 
     sockaddr_un SERVERADDRESS = {.sun_family = AF_UNIX};
-    const auto  PATH          = g_pCompositor->m_szInstancePath + "/.socket2.sock";
+    const auto  PATH          = g_pCompositor->m_instancePath + "/.socket2.sock";
     if (PATH.length() > sizeof(SERVERADDRESS.sun_path) - 1) {
-        Debug::log(ERR, "Socket2 path is too long. (2) IPC will not work.");
+        Log::logger->log(Log::ERR, "Socket2 path is too long. (2) IPC will not work.");
         return;
     }
 
     strncpy(SERVERADDRESS.sun_path, PATH.c_str(), sizeof(SERVERADDRESS.sun_path) - 1);
 
-    if (bind(m_iSocketFD, (sockaddr*)&SERVERADDRESS, SUN_LEN(&SERVERADDRESS)) < 0) {
-        Debug::log(ERR, "Couldn't bind the Hyprland Socket 2. (3) IPC will not work.");
+    if (bind(m_socketFD.get(), rc<sockaddr*>(&SERVERADDRESS), SUN_LEN(&SERVERADDRESS)) < 0) {
+        Log::logger->log(Log::ERR, "Couldn't bind the Hyprland Socket 2. (3) IPC will not work.");
         return;
     }
 
     // 10 max queued.
-    if (listen(m_iSocketFD, 10) < 0) {
-        Debug::log(ERR, "Couldn't listen on the Hyprland Socket 2. (4) IPC will not work.");
+    if (listen(m_socketFD.get(), 10) < 0) {
+        Log::logger->log(Log::ERR, "Couldn't listen on the Hyprland Socket 2. (4) IPC will not work.");
         return;
     }
 
-    m_pEventSource = wl_event_loop_add_fd(g_pCompositor->m_sWLEventLoop, m_iSocketFD, WL_EVENT_READABLE, onClientEvent, nullptr);
+    m_eventSource = wl_event_loop_add_fd(g_pCompositor->m_wlEventLoop, m_socketFD.get(), WL_EVENT_READABLE, onClientEvent, nullptr);
 }
 
 CEventManager::~CEventManager() {
-    for (const auto& client : m_vClients) {
+    for (const auto& client : m_clients) {
         wl_event_source_remove(client.eventSource);
-        close(client.fd);
     }
 
-    if (m_pEventSource != nullptr)
-        wl_event_source_remove(m_pEventSource);
-
-    if (m_iSocketFD >= 0)
-        close(m_iSocketFD);
+    if (m_eventSource != nullptr)
+        wl_event_source_remove(m_eventSource);
 }
 
 int CEventManager::onServerEvent(int fd, uint32_t mask, void* data) {
@@ -63,37 +59,35 @@ int CEventManager::onClientEvent(int fd, uint32_t mask, void* data) {
 
 int CEventManager::onServerEvent(int fd, uint32_t mask) {
     if (mask & WL_EVENT_ERROR || mask & WL_EVENT_HANGUP) {
-        Debug::log(ERR, "Socket2 hangup?? IPC broke");
+        Log::logger->log(Log::ERR, "Socket2 hangup?? IPC broke");
 
-        wl_event_source_remove(m_pEventSource);
-        m_pEventSource = nullptr;
-        close(fd);
-        m_iSocketFD = -1;
+        wl_event_source_remove(m_eventSource);
+        m_eventSource = nullptr;
+        m_socketFD.reset();
 
         return 0;
     }
 
-    sockaddr_in clientAddress;
-    socklen_t   clientSize         = sizeof(clientAddress);
-    const auto  ACCEPTEDCONNECTION = accept4(m_iSocketFD, (sockaddr*)&clientAddress, &clientSize, SOCK_CLOEXEC | SOCK_NONBLOCK);
-    if (ACCEPTEDCONNECTION < 0) {
+    sockaddr_in     clientAddress;
+    socklen_t       clientSize = sizeof(clientAddress);
+    CFileDescriptor ACCEPTEDCONNECTION{accept4(m_socketFD.get(), rc<sockaddr*>(&clientAddress), &clientSize, SOCK_CLOEXEC | SOCK_NONBLOCK)};
+    if (!ACCEPTEDCONNECTION.isValid()) {
         if (errno != EAGAIN) {
-            Debug::log(ERR, "Socket2 failed receiving connection, errno: {}", errno);
-            wl_event_source_remove(m_pEventSource);
-            m_pEventSource = nullptr;
-            close(fd);
-            m_iSocketFD = -1;
+            Log::logger->log(Log::ERR, "Socket2 failed receiving connection, errno: {}", errno);
+            wl_event_source_remove(m_eventSource);
+            m_eventSource = nullptr;
+            m_socketFD.reset();
         }
 
         return 0;
     }
 
-    Debug::log(LOG, "Socket2 accepted a new client at FD {}", ACCEPTEDCONNECTION);
+    Log::logger->log(Log::DEBUG, "Socket2 accepted a new client at FD {}", ACCEPTEDCONNECTION.get());
 
     // add to event loop so we can close it when we need to
-    auto* eventSource = wl_event_loop_add_fd(g_pCompositor->m_sWLEventLoop, ACCEPTEDCONNECTION, 0, onServerEvent, nullptr);
-    m_vClients.emplace_back(SClient{
-        ACCEPTEDCONNECTION,
+    auto* eventSource = wl_event_loop_add_fd(g_pCompositor->m_wlEventLoop, ACCEPTEDCONNECTION.get(), 0, onServerEvent, nullptr);
+    m_clients.emplace_back(SClient{
+        std::move(ACCEPTEDCONNECTION),
         {},
         eventSource,
     });
@@ -103,7 +97,7 @@ int CEventManager::onServerEvent(int fd, uint32_t mask) {
 
 int CEventManager::onClientEvent(int fd, uint32_t mask) {
     if (mask & WL_EVENT_ERROR || mask & WL_EVENT_HANGUP) {
-        Debug::log(LOG, "Socket2 fd {} hung up", fd);
+        Log::logger->log(Log::DEBUG, "Socket2 fd {} hung up", fd);
         removeClientByFD(fd);
         return 0;
     }
@@ -114,10 +108,10 @@ int CEventManager::onClientEvent(int fd, uint32_t mask) {
         // send all queued events
         while (!CLIENTIT->events.empty()) {
             const auto& event = CLIENTIT->events.front();
-            if (write(CLIENTIT->fd, event->c_str(), event->length()) < 0)
+            if (write(CLIENTIT->fd.get(), event->c_str(), event->length()) < 0)
                 break;
 
-            CLIENTIT->events.pop_front();
+            CLIENTIT->events.erase(CLIENTIT->events.begin());
         }
 
         // stop polling when we sent all events
@@ -129,15 +123,14 @@ int CEventManager::onClientEvent(int fd, uint32_t mask) {
 }
 
 std::vector<CEventManager::SClient>::iterator CEventManager::findClientByFD(int fd) {
-    return std::find_if(m_vClients.begin(), m_vClients.end(), [fd](const auto& client) { return client.fd == fd; });
+    return std::ranges::find_if(m_clients, [fd](const auto& client) { return client.fd.get() == fd; });
 }
 
 std::vector<CEventManager::SClient>::iterator CEventManager::removeClientByFD(int fd) {
     const auto CLIENTIT = findClientByFD(fd);
     wl_event_source_remove(CLIENTIT->eventSource);
-    close(fd);
 
-    return m_vClients.erase(CLIENTIT);
+    return m_clients.erase(CLIENTIT);
 }
 
 std::string CEventManager::formatEvent(const SHyprIPCEvent& event) const {
@@ -148,21 +141,21 @@ std::string CEventManager::formatEvent(const SHyprIPCEvent& event) const {
 }
 
 void CEventManager::postEvent(const SHyprIPCEvent& event) {
-    if (g_pCompositor->m_bIsShuttingDown) {
-        Debug::log(WARN, "Suppressed (shutting down) event of type {}, content: {}", event.event, event.data);
+    if (g_pCompositor->m_isShuttingDown) {
+        Log::logger->log(Log::WARN, "Suppressed (shutting down) event of type {}, content: {}", event.event, event.data);
         return;
     }
 
     const size_t MAX_QUEUED_EVENTS = 64;
     auto         sharedEvent       = makeShared<std::string>(formatEvent(event));
-    for (auto it = m_vClients.begin(); it != m_vClients.end();) {
+    for (auto it = m_clients.begin(); it != m_clients.end();) {
         // try to send the event immediately if the queue is empty
         const auto QUEUESIZE = it->events.size();
-        if (QUEUESIZE > 0 || write(it->fd, sharedEvent->c_str(), sharedEvent->length()) < 0) {
+        if (QUEUESIZE > 0 || write(it->fd.get(), sharedEvent->c_str(), sharedEvent->length()) < 0) {
             if (QUEUESIZE >= MAX_QUEUED_EVENTS) {
                 // too many events queued, remove the client
-                Debug::log(ERR, "Socket2 fd {} overflowed event queue, removing", it->fd);
-                it = removeClientByFD(it->fd);
+                Log::logger->log(Log::ERR, "Socket2 fd {} overflowed event queue, removing", it->fd.get());
+                it = removeClientByFD(it->fd.get());
                 continue;
             }
 

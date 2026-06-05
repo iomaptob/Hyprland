@@ -1,46 +1,32 @@
 #pragma once
 
-#include "../defines.hpp"
-#include "wlr-screencopy-unstable-v1.hpp"
 #include "WaylandProtocol.hpp"
+#include "wlr-screencopy-unstable-v1.hpp"
 
-#include <list>
-#include <vector>
-#include "../managers/HookSystemManager.hpp"
-#include "../helpers/Timer.hpp"
-#include "../managers/eventLoop/EventLoopTimer.hpp"
+#include "../helpers/time/Time.hpp"
+#include "./types/Buffer.hpp"
 #include <aquamarine/buffer/Buffer.hpp>
+
+#include <vector>
 
 class CMonitor;
 class IHLBuffer;
-
-enum eClientOwners {
-    CLIENT_SCREENCOPY = 0,
-    CLIENT_TOPLEVEL_EXPORT
+namespace Screenshare {
+    class CScreenshareSession;
+    class CScreenshareFrame;
 };
 
 class CScreencopyClient {
   public:
     CScreencopyClient(SP<CZwlrScreencopyManagerV1> resource_);
-    ~CScreencopyClient();
 
-    bool                  good();
-
-    WP<CScreencopyClient> self;
-    eClientOwners         clientOwner = CLIENT_SCREENCOPY;
-
-    CTimer                lastFrame;
-    int                   frameCounter = 0;
+    bool good();
 
   private:
-    SP<CZwlrScreencopyManagerV1> resource;
+    SP<CZwlrScreencopyManagerV1> m_resource;
+    WP<CScreencopyClient>        m_self;
 
-    int                          framesInLastHalfSecond = 0;
-    CTimer                       lastMeasure;
-    bool                         sentScreencast = false;
-
-    SP<HOOK_CALLBACK_FN>         tickCallback;
-    void                         onTick();
+    wl_client*                   m_savedClient = nullptr;
 
     void                         captureOutput(uint32_t frame, int32_t overlayCursor, wl_resource* output, CBox box);
 
@@ -49,35 +35,27 @@ class CScreencopyClient {
 
 class CScreencopyFrame {
   public:
-    CScreencopyFrame(SP<CZwlrScreencopyFrameV1> resource, int32_t overlay_cursor, wl_resource* output, CBox box);
-    ~CScreencopyFrame();
+    CScreencopyFrame(SP<CZwlrScreencopyFrameV1> resource, WP<Screenshare::CScreenshareSession> session, bool overlayCursor);
 
-    bool                  good();
-
-    SP<CScreencopyFrame>  self;
-    WP<CScreencopyClient> client;
+    bool good();
 
   private:
-    SP<CZwlrScreencopyFrameV1> resource;
+    SP<CZwlrScreencopyFrameV1>           m_resource;
+    WP<CScreencopyFrame>                 m_self;
+    WP<CScreencopyClient>                m_client;
 
-    CMonitor*                  pMonitor        = nullptr;
-    bool                       overlayCursor   = false;
-    bool                       withDamage      = false;
-    bool                       lockedSWCursors = false;
+    WP<Screenshare::CScreenshareSession> m_session;
+    UP<Screenshare::CScreenshareFrame>   m_frame;
 
-    WP<IHLBuffer>              buffer;
-    bool                       bufferDMA    = false;
-    uint32_t                   shmFormat    = 0;
-    uint32_t                   dmabufFormat = 0;
-    int                        shmStride    = 0;
-    CBox                       box          = {};
+    CHLBufferReference                   m_buffer;
+    Time::steady_tp                      m_timestamp;
+    bool                                 m_overlayCursor = true;
 
-    void                       copy(CZwlrScreencopyFrameV1* pFrame, wl_resource* buffer);
-    bool                       copyDmabuf();
-    bool                       copyShm();
-    void                       share();
+    //
+    void shareFrame(CZwlrScreencopyFrameV1* pFrame, wl_resource* buffer, bool withDamage);
 
     friend class CScreencopyProtocol;
+    friend class CScreencopyClient;
 };
 
 class CScreencopyProtocol : public IWaylandProtocol {
@@ -88,21 +66,9 @@ class CScreencopyProtocol : public IWaylandProtocol {
     void         destroyResource(CScreencopyClient* resource);
     void         destroyResource(CScreencopyFrame* resource);
 
-    void         onOutputCommit(CMonitor* pMonitor);
-
   private:
-    std::vector<SP<CScreencopyFrame>>  m_vFrames;
-    std::vector<SP<CScreencopyFrame>>  m_vFramesAwaitingWrite;
-    std::vector<SP<CScreencopyClient>> m_vClients;
-
-    SP<CEventLoopTimer>                m_pSoftwareCursorTimer;
-    bool                               m_bTimerArmed = false;
-
-    void                               shareAllFrames(CMonitor* pMonitor);
-    void                               shareFrame(CScreencopyFrame* frame);
-    void                               sendFrameDamage(CScreencopyFrame* frame);
-    bool                               copyFrameDmabuf(CScreencopyFrame* frame);
-    bool                               copyFrameShm(CScreencopyFrame* frame, timespec* now);
+    std::vector<SP<CScreencopyFrame>>  m_frames;
+    std::vector<SP<CScreencopyClient>> m_clients;
 
     friend class CScreencopyFrame;
     friend class CScreencopyClient;

@@ -9,11 +9,11 @@ bool IDataSource::dndDone() {
 }
 
 bool IDataSource::used() {
-    return wasUsed;
+    return m_wasUsed;
 }
 
 void IDataSource::markUsed() {
-    wasUsed = true;
+    m_wasUsed = true;
 }
 
 eDataSourceType IDataSource::type() {
@@ -26,4 +26,16 @@ void IDataSource::sendDndFinished() {
 
 uint32_t IDataSource::actions() {
     return 7; // all
+}
+
+void IDataSource::sendDndDropPerformed() {
+    ;
+}
+
+void IDataSource::sendDndAction(wl_data_device_manager_dnd_action a) {
+    ;
+}
+
+void IDataOffer::markDead() {
+    ;
 }

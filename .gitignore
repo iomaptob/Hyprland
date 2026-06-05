@@ -14,6 +14,7 @@ _deps
 
 build/
 result*
+/.pre-commit-config.yaml
 /.vscode/
 /.idea/
 .envrc
@@ -27,15 +28,31 @@ protocols/*.c*
 protocols/*.h*
 .ccls-cache
 *.so
+src/render/shaders/*.inc
+src/render/shaders/Shaders.hpp
 
 hyprctl/hyprctl
+hyprctl/hw-protocols/*.c*
+hyprctl/hw-protocols/*.h*
 
 gmon.out
 *.out
 *.tar.gz
+perf.data
+flame.svg
 
 PKGBUILD
 
 src/version.h
 hyprpm/Makefile
 hyprctl/Makefile
+example/hyprland.desktop
+
+**/.#*.*
+**/#*.*#
+
+debug-tools/flamegraph
+
+meta/hl.meta.lua
+
+hyprtester/pointer-scroll.txt

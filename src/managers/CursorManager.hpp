@@ -2,8 +2,8 @@
 
 #include <string>
 #include <hyprcursor/hyprcursor.hpp>
-#include <memory>
 #include "../includes.hpp"
+#include "../desktop/view/WLSurface.hpp"
 #include "../helpers/math/Math.hpp"
 #include "../helpers/memory/Memory.hpp"
 #include "../macros.hpp"
@@ -11,14 +11,12 @@
 #include "managers/XCursorManager.hpp"
 #include <aquamarine/buffer/Buffer.hpp>
 
-class CWLSurface;
-
 AQUAMARINE_FORWARD(IBuffer);
 
 class CCursorBuffer : public Aquamarine::IBuffer {
   public:
     CCursorBuffer(cairo_surface_t* surf, const Vector2D& size, const Vector2D& hotspot);
-    CCursorBuffer(uint8_t* pixelData, const Vector2D& size, const Vector2D& hotspot);
+    CCursorBuffer(const uint8_t* pixelData, const Vector2D& size, const Vector2D& hotspot);
     ~CCursorBuffer() = default;
 
     virtual Aquamarine::eBufferCapability          caps();
@@ -31,10 +29,9 @@ class CCursorBuffer : public Aquamarine::IBuffer {
     virtual void                                   endDataPtr();
 
   private:
-    Vector2D         hotspot;
-    cairo_surface_t* surface   = nullptr;
-    uint8_t*         pixelData = nullptr;
-    size_t           stride    = 0;
+    Vector2D             m_hotspot;
+    std::vector<uint8_t> m_data;
+    size_t               m_stride = 0;
 };
 
 class CCursorManager {
@@ -45,7 +42,7 @@ class CCursorManager {
     SP<Aquamarine::IBuffer> getCursorBuffer();
 
     void                    setCursorFromName(const std::string& name);
-    void                    setCursorSurface(SP<CWLSurface> surf, const Vector2D& hotspot);
+    void                    setCursorSurface(SP<Desktop::View::CWLSurface> surf, const Vector2D& hotspot);
     void                    setCursorBuffer(SP<CCursorBuffer> buf, const Vector2D& hotspot, const float& scale);
     void                    setAnimationTimer(const int& frame, const int& delay);
 
@@ -57,23 +54,25 @@ class CCursorManager {
 
     void                    tickAnimatedCursor();
 
+    float                   getScaledSize() const;
+
   private:
-    bool                                            m_bOurBufferConnected = false;
-    std::vector<SP<CCursorBuffer>>                  m_vCursorBuffers;
+    bool                               m_ourBufferConnected = false;
+    std::vector<SP<CCursorBuffer>>     m_cursorBuffers;
 
-    std::unique_ptr<Hyprcursor::CHyprcursorManager> m_pHyprcursor;
-    std::unique_ptr<CXCursorManager>                m_pXcursor;
-    SP<SXCursors>                                   m_currentXcursor;
+    UP<Hyprcursor::CHyprcursorManager> m_hyprcursor;
+    UP<CXCursorManager>                m_xcursor;
+    SP<SXCursors>                      m_currentXcursor;
 
-    std::string                                     m_szTheme      = "";
-    int                                             m_iSize        = 0;
-    float                                           m_fCursorScale = 1.0;
+    std::string                        m_theme       = "";
+    int                                m_size        = 0;
+    float                              m_cursorScale = 1.0;
 
-    Hyprcursor::SCursorStyleInfo                    m_sCurrentStyleInfo;
+    Hyprcursor::SCursorStyleInfo       m_currentStyleInfo;
 
-    SP<CEventLoopTimer>                             m_pAnimationTimer;
-    int                                             m_iCurrentAnimationFrame = 0;
-    Hyprcursor::SCursorShapeData                    m_sCurrentCursorShapeData;
+    SP<CEventLoopTimer>                m_animationTimer;
+    int                                m_currentAnimationFrame = 0;
+    Hyprcursor::SCursorShapeData       m_currentCursorShapeData;
 };
 
-inline std::unique_ptr<CCursorManager> g_pCursorManager;
+inline UP<CCursorManager> g_pCursorManager;

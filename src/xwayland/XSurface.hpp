@@ -1,6 +1,5 @@
 #pragma once
 
-#include "../helpers/WLListener.hpp"
 #include "../helpers/signal/Signal.hpp"
 #include "../helpers/memory/Memory.hpp"
 #include "../helpers/math/Math.hpp"
@@ -10,9 +9,10 @@ class CWLSurfaceResource;
 class CXWaylandSurfaceResource;
 
 #ifdef NO_XWAYLAND
-typedef uint32_t xcb_pixmap_t;
-typedef uint32_t xcb_window_t;
-typedef struct {
+using xcb_pixmap_t = uint32_t;
+using xcb_window_t = uint32_t;
+using xcb_atom_t   = uint32_t;
+struct xcb_icccm_wm_hints_t {
     int32_t      flags;
     uint32_t     input;
     int32_t      initial_state;
@@ -21,8 +21,8 @@ typedef struct {
     int32_t      icon_x, icon_y;
     xcb_pixmap_t icon_mask;
     xcb_window_t window_group;
-} xcb_icccm_wm_hints_t;
-typedef struct {
+};
+struct xcb_size_hints_t {
     uint32_t flags;
     int32_t  x, y;
     int32_t  width, height;
@@ -33,32 +33,32 @@ typedef struct {
     int32_t  max_aspect_num, max_aspect_den;
     int32_t  base_width, base_height;
     uint32_t win_gravity;
-} xcb_size_hints_t;
+};
 #else
 #include <xcb/xcb_icccm.h>
 #endif
 
 class CXWaylandSurface {
   public:
-    WP<CWLSurfaceResource>       surface;
-    WP<CXWaylandSurfaceResource> resource;
+    WP<CWLSurfaceResource>       m_surface;
+    WP<CXWaylandSurfaceResource> m_resource;
 
     struct {
-        CSignal stateChanged;    // maximized, fs, minimized, etc.
-        CSignal metadataChanged; // title, appid
-        CSignal destroy;
+        CSignalT<>     stateChanged;    // maximized, fs, minimized, etc.
+        CSignalT<>     metadataChanged; // title, appid
+        CSignalT<>     destroy;
 
-        CSignal resourceChange; // associated / dissociated
+        CSignalT<>     resourceChange; // associated / dissociated
 
-        CSignal setGeometry;
-        CSignal configure; // CBox
+        CSignalT<>     setGeometry;
+        CSignalT<CBox> configureRequest;
 
-        CSignal map;
-        CSignal unmap;
-        CSignal commit;
+        CSignalT<>     map;
+        CSignalT<>     unmap;
+        CSignalT<>     commit;
 
-        CSignal activate;
-    } events;
+        CSignalT<>     activate;
+    } m_events;
 
     struct {
         std::string title;
@@ -68,30 +68,32 @@ class CXWaylandSurface {
         std::optional<bool> requestsMaximize;
         std::optional<bool> requestsFullscreen;
         std::optional<bool> requestsMinimize;
-    } state;
+    } m_state;
 
-    uint32_t                          xID      = 0;
-    uint64_t                          wlID     = 0;
-    uint64_t                          wlSerial = 0;
-    pid_t                             pid      = 0;
-    CBox                              geometry;
-    bool                              overrideRedirect = false;
-    bool                              withdrawn        = false;
-    bool                              fullscreen       = false;
-    bool                              maximized        = false;
-    bool                              minimized        = false;
-    bool                              mapped           = false;
-    bool                              modal            = false;
+    uint32_t                          m_xID         = 0;
+    uint64_t                          m_wlID        = 0;
+    uint64_t                          m_wlSerial    = 0;
+    uint32_t                          m_lastPingSeq = 0;
+    pid_t                             m_pid         = 0;
+    CBox                              m_geometry;
+    bool                              m_overrideRedirect = false;
+    bool                              m_withdrawn        = false;
+    bool                              m_fullscreen       = false;
+    bool                              m_maximized        = false;
+    bool                              m_minimized        = false;
+    bool                              m_mapped           = false;
+    bool                              m_modal            = false;
 
-    WP<CXWaylandSurface>              parent;
-    WP<CXWaylandSurface>              self;
-    std::vector<WP<CXWaylandSurface>> children;
+    WP<CXWaylandSurface>              m_parent;
+    WP<CXWaylandSurface>              m_self;
+    std::vector<WP<CXWaylandSurface>> m_children;
 
-    UP<xcb_icccm_wm_hints_t>          hints;
-    UP<xcb_size_hints_t>              sizeHints;
-    std::vector<uint32_t>             atoms;
-    std::string                       role      = "";
-    bool                              transient = false;
+    UP<xcb_icccm_wm_hints_t>          m_hints;
+    UP<xcb_size_hints_t>              m_sizeHints;
+    std::vector<uint32_t>             m_atoms;
+    std::vector<uint32_t>             m_protocols;
+    std::string                       m_role      = "";
+    bool                              m_transient = false;
 
     bool                              wantsFocus();
     void                              configure(const CBox& box);
@@ -100,6 +102,7 @@ class CXWaylandSurface {
     void                              setMinimized(bool mz);
     void                              restackToTop();
     void                              close();
+    void                              ping();
 
   private:
     CXWaylandSurface(uint32_t xID, CBox geometry, bool OR);
@@ -109,12 +112,15 @@ class CXWaylandSurface {
     void unmap();
     void considerMap();
     void setWithdrawn(bool withdrawn);
+    void recheckSupportedProps();
 
     struct {
         CHyprSignalListener destroyResource;
         CHyprSignalListener destroySurface;
         CHyprSignalListener commitSurface;
-    } listeners;
+    } m_listeners;
+
+    std::unordered_map<xcb_atom_t, bool> m_supportedProps;
 
     friend class CXWM;
 };

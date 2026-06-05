@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Buffer.hpp"
+#include <hyprutils/os/FileDescriptor.hpp>
 
 class CDMABuffer : public IHLBuffer {
   public:
@@ -15,15 +16,14 @@ class CDMABuffer : public IHLBuffer {
     virtual std::tuple<uint8_t*, uint32_t, size_t> beginDataPtr(uint32_t flags);
     virtual void                                   endDataPtr();
     bool                                           good();
-    void                                           updateTexture();
     void                                           closeFDs();
-
-    bool                                           success = false;
+    Hyprutils::OS::CFileDescriptor                 exportSyncFile();
+    bool                                           m_success = false;
 
   private:
-    Aquamarine::SDMABUFAttrs attrs;
+    Aquamarine::SDMABUFAttrs m_attrs;
 
     struct {
         CHyprSignalListener resourceDestroy;
-    } listeners;
+    } m_listeners;
 };

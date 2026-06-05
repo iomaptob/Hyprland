@@ -1,12 +1,8 @@
 #include "IHyprWindowDecoration.hpp"
 
-class CWindow;
-
-IHyprWindowDecoration::IHyprWindowDecoration(PHLWINDOW pWindow) {
-    m_pWindow = pWindow;
+IHyprWindowDecoration::IHyprWindowDecoration(PHLWINDOW pWindow) : m_window(pWindow) {
+    ;
 }
-
-IHyprWindowDecoration::~IHyprWindowDecoration() {}
 
 bool IHyprWindowDecoration::onInputOnDeco(const eInputType, const Vector2D&, std::any) {
     return false;

@@ -3,10 +3,12 @@
 #include "../../defines.hpp"
 #include "../../render/Texture.hpp"
 #include "./WLBuffer.hpp"
+#include "../DRMSyncobj.hpp"
 
 #include <aquamarine/buffer/Buffer.hpp>
 
 class CSyncReleaser;
+class CHLBufferReference;
 
 class IHLBuffer : public Aquamarine::IBuffer {
   public:
@@ -21,31 +23,48 @@ class IHLBuffer : public Aquamarine::IBuffer {
     virtual void                          unlock();
     virtual bool                          locked();
 
-    void                                  unlockOnBufferRelease(WP<CWLSurfaceResource> surf /* optional */);
+    void                                  onBackendRelease(const std::function<void()>& fn);
+    void                                  addReleasePoint(CDRMSyncPointState& point);
 
-    SP<CTexture>                          texture;
-    bool                                  opaque = false;
-    SP<CWLBufferResource>                 resource;
+    SP<Render::ITexture>                  m_texture;
+    bool                                  m_opaque = false;
+    SP<CWLBufferResource>                 m_resource;
+    std::vector<UP<CSyncReleaser>>        m_syncReleasers;
+    Hyprutils::OS::CFileDescriptor        m_syncFd;
 
     struct {
         CHyprSignalListener backendRelease;
         CHyprSignalListener backendRelease2; // for explicit ds
-    } hlEvents;
+    } m_hlEvents;
 
   private:
-    int nLocks = 0;
+    int                   m_locks = 0;
+    std::function<void()> m_backendReleaseQueuedFn;
+
+    friend class CHLBufferReference;
 };
 
 // for ref-counting. Releases in ~dtor
-// surface optional
 class CHLBufferReference {
   public:
-    CHLBufferReference(SP<IHLBuffer> buffer, SP<CWLSurfaceResource> surface);
+    CHLBufferReference();
+    CHLBufferReference(const CHLBufferReference& other);
+    CHLBufferReference(CHLBufferReference&& other) noexcept;
+    CHLBufferReference(SP<IHLBuffer> buffer);
     ~CHLBufferReference();
 
-    WP<IHLBuffer>     buffer;
-    SP<CSyncReleaser> releaser;
+    CHLBufferReference& operator=(const CHLBufferReference& other);
+    CHLBufferReference& operator=(CHLBufferReference&& other);
 
-  private:
-    WP<CWLSurfaceResource> surface;
+    bool                operator==(const CHLBufferReference& other) const;
+    bool                operator==(const SP<IHLBuffer>& other) const;
+    bool                operator==(const SP<Aquamarine::IBuffer>& other) const;
+    SP<IHLBuffer>       operator->() const;
+    //
+    operator bool() const;
+
+    // unlock and drop the buffer without sending release
+    void          drop();
+
+    SP<IHLBuffer> m_buffer;
 };

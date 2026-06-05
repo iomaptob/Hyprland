@@ -1,11 +1,11 @@
 #pragma once
 
-#include <memory>
 #include <vector>
 #include <cstdint>
 #include "WaylandProtocol.hpp"
 #include "wlr-data-control-unstable-v1.hpp"
 #include "types/DataDevice.hpp"
+#include <hyprutils/os/FileDescriptor.hpp>
 
 class CWLRDataControlManagerResource;
 class CWLRDataSource;
@@ -19,13 +19,13 @@ class CWLRDataOffer {
     bool            good();
     void            sendData();
 
-    bool            dead    = false;
-    bool            primary = false;
+    bool            m_dead    = false;
+    bool            m_primary = false;
 
-    WP<IDataSource> source;
+    WP<IDataSource> m_source;
 
   private:
-    SP<CZwlrDataControlOfferV1> resource;
+    SP<CZwlrDataControlOfferV1> m_resource;
 
     friend class CWLRDataDevice;
 };
@@ -39,17 +39,17 @@ class CWLRDataSource : public IDataSource {
     bool                             good();
 
     virtual std::vector<std::string> mimes();
-    virtual void                     send(const std::string& mime, uint32_t fd);
+    virtual void                     send(const std::string& mime, Hyprutils::OS::CFileDescriptor fd);
     virtual void                     accepted(const std::string& mime);
     virtual void                     cancelled();
     virtual void                     error(uint32_t code, const std::string& msg);
 
-    std::vector<std::string>         mimeTypes;
-    WP<CWLRDataSource>               self;
-    WP<CWLRDataDevice>               device;
+    std::vector<std::string>         m_mimeTypes;
+    WP<CWLRDataSource>               m_self;
+    WP<CWLRDataDevice>               m_device;
 
   private:
-    SP<CZwlrDataControlSourceV1> resource;
+    SP<CZwlrDataControlSourceV1> m_resource;
 };
 
 class CWLRDataDevice {
@@ -67,8 +67,8 @@ class CWLRDataDevice {
     WP<CWLRDataDevice> self;
 
   private:
-    SP<CZwlrDataControlDeviceV1> resource;
-    wl_client*                   pClient = nullptr;
+    SP<CZwlrDataControlDeviceV1> m_resource;
+    wl_client*                   m_client = nullptr;
 
     friend class CDataDeviceWLRProtocol;
 };
@@ -79,11 +79,11 @@ class CWLRDataControlManagerResource {
 
     bool                            good();
 
-    WP<CWLRDataDevice>              device;
-    std::vector<WP<CWLRDataSource>> sources;
+    WP<CWLRDataDevice>              m_device;
+    std::vector<WP<CWLRDataSource>> m_sources;
 
   private:
-    SP<CZwlrDataControlManagerV1> resource;
+    SP<CZwlrDataControlManagerV1> m_resource;
 };
 
 class CDataDeviceWLRProtocol : public IWaylandProtocol {
@@ -99,10 +99,10 @@ class CDataDeviceWLRProtocol : public IWaylandProtocol {
     void destroyResource(CWLRDataOffer* resource);
 
     //
-    std::vector<SP<CWLRDataControlManagerResource>> m_vManagers;
-    std::vector<SP<CWLRDataSource>>                 m_vSources;
-    std::vector<SP<CWLRDataDevice>>                 m_vDevices;
-    std::vector<SP<CWLRDataOffer>>                  m_vOffers;
+    std::vector<SP<CWLRDataControlManagerResource>> m_managers;
+    std::vector<SP<CWLRDataSource>>                 m_sources;
+    std::vector<SP<CWLRDataDevice>>                 m_devices;
+    std::vector<SP<CWLRDataOffer>>                  m_offers;
 
     //
     void setSelection(SP<IDataSource> source, bool primary);

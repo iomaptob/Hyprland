@@ -1,6 +1,5 @@
 #pragma once
 
-#include <memory>
 #include <vector>
 #include <unordered_map>
 #include "WaylandProtocol.hpp"
@@ -8,25 +7,28 @@
 #include "../helpers/signal/Signal.hpp"
 
 class CWLSurfaceResource;
+class CAlphaModifierProtocol;
 
 class CAlphaModifier {
   public:
-    CAlphaModifier(SP<CWpAlphaModifierSurfaceV1> resource_, SP<CWLSurfaceResource> surface);
-    ~CAlphaModifier();
+    CAlphaModifier(UP<CWpAlphaModifierSurfaceV1>&& resource_, SP<CWLSurfaceResource> surface);
 
-    bool                   good();
-    SP<CWLSurfaceResource> getSurface();
-    void                   onSurfaceDestroy();
+    bool good();
+    void setResource(UP<CWpAlphaModifierSurfaceV1>&& resource);
 
   private:
-    SP<CWpAlphaModifierSurfaceV1> resource;
-    WP<CWLSurfaceResource>        pSurface;
+    UP<CWpAlphaModifierSurfaceV1> m_resource;
+    WP<CWLSurfaceResource>        m_surface;
+    float                         m_alpha = 1.0;
 
-    void                          setSurfaceAlpha(float a);
+    void                          destroy();
 
     struct {
-        CHyprSignalListener destroySurface;
-    } listeners;
+        CHyprSignalListener surfaceCommitted;
+        CHyprSignalListener surfaceDestroyed;
+    } m_listeners;
+
+    friend class CAlphaModifierProtocol;
 };
 
 class CAlphaModifierProtocol : public IWaylandProtocol {
@@ -36,13 +38,13 @@ class CAlphaModifierProtocol : public IWaylandProtocol {
     virtual void bindManager(wl_client* client, void* data, uint32_t ver, uint32_t id);
 
   private:
-    void onManagerResourceDestroy(wl_resource* res);
-    void destroyModifier(CAlphaModifier* decoration);
-    void onGetSurface(CWpAlphaModifierV1* pMgr, uint32_t id, SP<CWLSurfaceResource> surface);
+    void destroyManager(CWpAlphaModifierV1* res);
+    void destroyAlphaModifier(CAlphaModifier* surface);
+    void getSurface(CWpAlphaModifierV1* manager, uint32_t id, SP<CWLSurfaceResource> surface);
 
     //
-    std::vector<UP<CWpAlphaModifierV1>>                            m_vManagers;
-    std::unordered_map<WP<CWLSurfaceResource>, UP<CAlphaModifier>> m_mAlphaModifiers; // xdg_toplevel -> deco
+    std::vector<UP<CWpAlphaModifierV1>>                            m_managers;
+    std::unordered_map<WP<CWLSurfaceResource>, UP<CAlphaModifier>> m_alphaModifiers;
 
     friend class CAlphaModifier;
 };

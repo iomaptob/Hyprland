@@ -1,7 +1,6 @@
 #pragma once
 
 #include "IHID.hpp"
-#include "../helpers/WLListener.hpp"
 #include "../macros.hpp"
 #include "../helpers/math/Math.hpp"
 
@@ -18,8 +17,10 @@ class IPointer : public IHID {
     virtual SP<Aquamarine::IPointer> aq()        = 0;
 
     struct SMotionEvent {
-        uint32_t timeMs = 0;
-        Vector2D delta, unaccel;
+        uint32_t     timeMs = 0;
+        Vector2D     delta, unaccel;
+        bool         mouse = false;
+        SP<IPointer> device;
     };
 
     struct SMotionAbsoluteEvent {
@@ -32,6 +33,7 @@ class IPointer : public IHID {
         uint32_t                timeMs = 0;
         uint32_t                button = 0;
         wl_pointer_button_state state  = WL_POINTER_BUTTON_STATE_PRESSED;
+        bool                    mouse  = false;
     };
 
     struct SAxisEvent {
@@ -41,6 +43,7 @@ class IPointer : public IHID {
         wl_pointer_axis_relative_direction relativeDirection = WL_POINTER_AXIS_RELATIVE_DIRECTION_IDENTICAL;
         double                             delta             = 0.0;
         int32_t                            deltaDiscrete     = 0;
+        bool                               mouse             = false;
     };
 
     struct SSwipeBeginEvent {
@@ -87,27 +90,30 @@ class IPointer : public IHID {
     };
 
     struct {
-        CSignal motion;
-        CSignal motionAbsolute;
-        CSignal button;
-        CSignal axis;
-        CSignal frame;
+        CSignalT<SMotionEvent>         motion;
+        CSignalT<SMotionAbsoluteEvent> motionAbsolute;
+        CSignalT<SButtonEvent>         button;
+        CSignalT<SAxisEvent>           axis;
+        CSignalT<>                     frame;
 
-        CSignal swipeBegin;
-        CSignal swipeEnd;
-        CSignal swipeUpdate;
+        CSignalT<SSwipeBeginEvent>     swipeBegin;
+        CSignalT<SSwipeEndEvent>       swipeEnd;
+        CSignalT<SSwipeUpdateEvent>    swipeUpdate;
 
-        CSignal pinchBegin;
-        CSignal pinchEnd;
-        CSignal pinchUpdate;
+        CSignalT<SPinchBeginEvent>     pinchBegin;
+        CSignalT<SPinchEndEvent>       pinchEnd;
+        CSignalT<SPinchUpdateEvent>    pinchUpdate;
 
-        CSignal holdBegin;
-        CSignal holdEnd;
-    } pointerEvents;
+        CSignalT<SHoldBeginEvent>      holdBegin;
+        CSignalT<SHoldEndEvent>        holdEnd;
+    } m_pointerEvents;
 
-    std::string  hlName;
-    bool         connected   = false; // means connected to the cursor
-    std::string  boundOutput = "";
+    bool                 m_connected    = false; // means connected to the cursor
+    std::string          m_boundOutput  = "";
+    bool                 m_flipX        = false; // decide to invert horizontal movement
+    bool                 m_flipY        = false; // decide to invert vertical movement
+    bool                 m_isTouchpad   = false;
+    std::optional<float> m_scrollFactor = {};
 
-    WP<IPointer> self;
+    WP<IPointer>         m_self;
 };

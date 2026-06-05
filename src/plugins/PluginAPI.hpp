@@ -25,18 +25,20 @@ Feel like the API is missing something you'd like to use in your plugin? Open an
 #include "../SharedDefs.hpp"
 #include "../defines.hpp"
 #include "../version.h"
+#include "../config/values/types/IValue.hpp"
 
 #include <any>
 #include <functional>
 #include <string>
+#include <string_view>
 #include <hyprlang.hpp>
 
-typedef struct {
+using PLUGIN_DESCRIPTION_INFO = struct {
     std::string name;
     std::string description;
     std::string author;
     std::string version;
-} PLUGIN_DESCRIPTION_INFO;
+};
 
 struct SFunctionMatch {
     void*       address = nullptr;
@@ -59,24 +61,41 @@ struct SVersionInfo {
 #define OPTIONAL
 #define HANDLE void*
 
+// C ABI is needed to prevent symbol mangling, but we don't actually need C compatibility,
+// so we ignore this warning about return types that are potentially incompatible with C.
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wreturn-type-c-linkage"
+#endif
+
 class IHyprLayout;
-class CWindow;
 class IHyprWindowDecoration;
 struct SConfigValue;
-class CWindow;
+class Hypr_dummyClass {};
+extern "C" {
+struct lua_State;
+}
+
+namespace Layout {
+    class ITiledAlgorithm;
+    class IFloatingAlgorithm;
+};
+
+using HOOK_CALLBACK_FN = Hypr_dummyClass;
+using PLUGIN_LUA_FN    = int (*)(lua_State* L);
 
 /*
     These methods are for the plugin to implement
     Methods marked with REQUIRED are required.
 */
 
-/* 
+/*
     called pre-plugin init.
     In case of a version mismatch, will eject the .so.
 
     This function should not be modified, see the example plugin.
 */
-typedef REQUIRED std::string (*PPLUGIN_API_VERSION_FUNC)();
+using PPLUGIN_API_VERSION_FUNC = REQUIRED std::string (*)();
 #define PLUGIN_API_VERSION          pluginAPIVersion
 #define PLUGIN_API_VERSION_FUNC_STR "pluginAPIVersion"
 
@@ -86,7 +105,7 @@ typedef REQUIRED std::string (*PPLUGIN_API_VERSION_FUNC)();
 
     Keep in mind this is executed synchronously, and as such any blocking calls to hyprland might hang. (e.g. system("hyprctl ..."))
 */
-typedef REQUIRED PLUGIN_DESCRIPTION_INFO (*PPLUGIN_INIT_FUNC)(HANDLE);
+using PPLUGIN_INIT_FUNC = REQUIRED PLUGIN_DESCRIPTION_INFO (*)(HANDLE);
 #define PLUGIN_INIT          pluginInit
 #define PLUGIN_INIT_FUNC_STR "pluginInit"
 
@@ -96,7 +115,7 @@ typedef REQUIRED PLUGIN_DESCRIPTION_INFO (*PPLUGIN_INIT_FUNC)(HANDLE);
 
     Hooks are unloaded after exit.
 */
-typedef OPTIONAL void (*PPLUGIN_EXIT_FUNC)(void);
+using PPLUGIN_EXIT_FUNC = OPTIONAL void (*)();
 #define PLUGIN_EXIT          pluginExit
 #define PLUGIN_EXIT_FUNC_STR "pluginExit"
 
@@ -104,6 +123,7 @@ typedef OPTIONAL void (*PPLUGIN_EXIT_FUNC)(void);
     End plugin methods
 */
 
+// NOLINTNEXTLINE(readability-identifier-naming)
 namespace HyprlandAPI {
 
     /*
@@ -114,28 +134,36 @@ namespace HyprlandAPI {
         After you have registered ALL of your config values, you may call `getConfigValue`
 
         returns: true on success, false on fail
+
+        deprecated: please use V2
     */
-    APICALL bool addConfigValue(HANDLE handle, const std::string& name, const Hyprlang::CConfigValue& value);
+    APICALL [[deprecated]] bool addConfigValue(HANDLE handle, const std::string& name, const Hyprlang::CConfigValue& value);
 
     /*
         Add a config keyword.
         This method may only be called in "pluginInit"
 
         returns: true on success, false on fail
+
+        deprecated: please use V2
     */
-    APICALL bool addConfigKeyword(HANDLE handle, const std::string& name, Hyprlang::PCONFIGHANDLERFUNC fn, Hyprlang::SHandlerOptions opts);
+    APICALL [[deprecated]] bool addConfigKeyword(HANDLE handle, const std::string& name, Hyprlang::PCONFIGHANDLERFUNC fn, Hyprlang::SHandlerOptions opts);
 
     /*
         Get a config value.
 
-        Please see the <hyprlang.hpp> header or https://hyprland.org/hyprlang/ for docs regarding Hyprlang types.
+        Please see the <hyprlang.hpp> header or https://hypr.land/hyprlang/ for docs regarding Hyprlang types.
 
         returns: a pointer to the config value struct, which is guaranteed to be valid for the life of this plugin, unless another `addConfigValue` is called afterwards.
                 nullptr on error.
+
+        Deprecated: please use V2
     */
-    APICALL Hyprlang::CConfigValue* getConfigValue(HANDLE handle, const std::string& name);
+    APICALL [[deprecated]] Hyprlang::CConfigValue* getConfigValue(HANDLE handle, const std::string& name);
 
     /*
+        Deprecated: doesn't do anything anymore, use Event::bus()
+
         Register a dynamic (function) callback to a selected event.
         Pointer will be free'd by Hyprland on unregisterCallback().
 
@@ -143,7 +171,7 @@ namespace HyprlandAPI {
 
         WARNING: Losing this pointer will unregister the callback!
     */
-    APICALL [[nodiscard]] SP<HOOK_CALLBACK_FN> registerCallbackDynamic(HANDLE handle, const std::string& event, HOOK_CALLBACK_FN fn);
+    APICALL [[deprecated]] [[nodiscard]] SP<HOOK_CALLBACK_FN> registerCallbackDynamic(HANDLE handle, const std::string& event, HOOK_CALLBACK_FN fn);
 
     /*
         Unregisters a callback. If the callback was dynamic, frees the memory.
@@ -165,15 +193,26 @@ namespace HyprlandAPI {
         Adds a layout to Hyprland.
 
         returns: true on success. False otherwise.
+
+        deprecated: addTiledAlgo, addFloatingAlgo
     */
-    APICALL bool addLayout(HANDLE handle, const std::string& name, IHyprLayout* layout);
+    APICALL [[deprecated]] bool addLayout(HANDLE handle, const std::string& name, IHyprLayout* layout);
 
     /*
         Removes an added layout from Hyprland.
 
         returns: true on success. False otherwise.
+
+        deprecated: V2 removeAlgo
     */
-    APICALL bool removeLayout(HANDLE handle, IHyprLayout* layout);
+    APICALL [[deprecated]] bool removeLayout(HANDLE handle, IHyprLayout* layout);
+
+    /*
+        Algorithm fns. Used for registering and removing. Return success.
+    */
+    APICALL bool addTiledAlgo(HANDLE handle, const std::string& name, const std::type_info* typeInfo, std::function<UP<Layout::ITiledAlgorithm>()>&& factory);
+    APICALL bool addFloatingAlgo(HANDLE handle, const std::string& name, const std::type_info* typeInfo, std::function<UP<Layout::IFloatingAlgorithm>()>&& factory);
+    APICALL bool removeAlgo(HANDLE handle, const std::string& name);
 
     /*
         Queues a config reload. Does not take effect immediately.
@@ -187,7 +226,7 @@ namespace HyprlandAPI {
 
         returns: true on success. False otherwise.
     */
-    APICALL bool addNotification(HANDLE handle, const std::string& text, const CColor& color, const float timeMs);
+    APICALL bool addNotification(HANDLE handle, const std::string& text, const CHyprColor& color, const float timeMs);
 
     /*
         Creates a trampoline function hook to an internal hl func.
@@ -222,7 +261,7 @@ namespace HyprlandAPI {
 
         returns: true on success. False otherwise.
     */
-    APICALL bool addWindowDecoration(HANDLE handle, PHLWINDOW pWindow, std::unique_ptr<IHyprWindowDecoration> pDecoration);
+    APICALL bool addWindowDecoration(HANDLE handle, PHLWINDOW pWindow, UP<IHyprWindowDecoration> pDecoration);
 
     /*
         Removes a window decoration
@@ -235,8 +274,17 @@ namespace HyprlandAPI {
         Adds a keybind dispatcher.
 
         returns: true on success. False otherwise.
+
+        DEPRECATED: use addDispatcherV2
     */
-    APICALL bool addDispatcher(HANDLE handle, const std::string& name, std::function<void(std::string)> handler);
+    APICALL [[deprecated]] bool addDispatcher(HANDLE handle, const std::string& name, std::function<void(std::string)> handler);
+
+    /*
+        Adds a keybind dispatcher.
+
+        returns: true on success. False otherwise.
+    */
+    APICALL bool addDispatcherV2(HANDLE handle, const std::string& name, std::function<SDispatchResult(std::string)> handler);
 
     /*
         Removes a keybind dispatcher.
@@ -251,7 +299,7 @@ namespace HyprlandAPI {
         data has to contain:
          - text: std::string or const char*
          - time: uint64_t
-         - color: CColor -> CColor(0) will apply the default color for the notification icon
+         - color: CHyprColor -> CHyprColor(0) will apply the default color for the notification icon
 
         data may contain:
          - icon: eIcons
@@ -288,10 +336,37 @@ namespace HyprlandAPI {
         returns: true on success. False otherwise.
     */
     APICALL bool unregisterHyprCtlCommand(HANDLE handle, SP<SHyprCtlCommand> cmd);
+
+    /*
+        Add a new config value. Keep the pointer, you can use it for retrieving the value.
+
+        Please note this value name must start with plugin:, e.g. plugin:my_plugin:value
+
+        returns: true on success. False otherwise.
+    */
+    APICALL bool addConfigValueV2(HANDLE handle, SP<Config::Values::IValue> value);
+
+    /*
+        Register a plugin-owned Lua C callback under hl.plugin.<namespace>.<name>.
+
+        Callbacks are removed automatically on plugin unload.
+
+        returns: true on success. False otherwise.
+    */
+    APICALL bool addLuaFunction(HANDLE handle, const std::string& namespace_, const std::string& name, PLUGIN_LUA_FN fn);
+
+    /*
+        Unregister a plugin-owned Lua C callback from hl.plugin.<namespace>.<name>.
+
+        returns: true on success. False otherwise.
+    */
+    APICALL bool removeLuaFunction(HANDLE handle, const std::string& namespace_, const std::string& name);
+
 };
 
+// NOLINTBEGIN
 /*
-    Get the hash this plugin/server was compiled with.
+    Get the descriptive string this plugin/server was compiled with.
 
     This function will end up in both hyprland and any/all plugins,
     and can be found by a simple dlsym()
@@ -301,5 +376,21 @@ namespace HyprlandAPI {
 */
 APICALL EXPORT const char*        __hyprland_api_get_hash();
 APICALL inline EXPORT const char* __hyprland_api_get_client_hash() {
-    return GIT_COMMIT_HASH;
+    static auto stripPatch = [](const char* ver) -> std::string {
+        std::string_view v = ver;
+        if (!v.contains('.'))
+            return std::string{v};
+
+        return std::string{v.substr(0, v.find_last_of('.'))};
+    };
+
+    static const std::string ver = (std::string{GIT_COMMIT_HASH} + "_aq_" + stripPatch(AQUAMARINE_VERSION) + "_hu_" + stripPatch(HYPRUTILS_VERSION) + "_hg_" +
+                                    stripPatch(HYPRGRAPHICS_VERSION) + "_hc_" + stripPatch(HYPRCURSOR_VERSION) + "_hlg_" + stripPatch(HYPRLANG_VERSION));
+
+    return ver.c_str();
 }
+// NOLINTEND
+
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif

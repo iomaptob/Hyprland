@@ -6,15 +6,14 @@
 #include "../../helpers/math/Math.hpp"
 #include "../../desktop/DesktopTypes.hpp"
 
-class CWindow;
 class IHyprWindowDecoration;
 
-enum eDecorationPositioningPolicy {
+enum eDecorationPositioningPolicy : uint8_t {
     DECORATION_POSITION_ABSOLUTE = 0, /* Decoration wants absolute positioning */
     DECORATION_POSITION_STICKY,       /* Decoration is stuck to some edge of a window */
 };
 
-enum eDecorationEdges {
+enum eDecorationEdges : uint8_t {
     DECORATION_EDGE_TOP    = 1 << 0,
     DECORATION_EDGE_BOTTOM = 1 << 1,
     DECORATION_EDGE_LEFT   = 1 << 2,
@@ -59,13 +58,13 @@ class CDecorationPositioner {
   public:
     CDecorationPositioner();
 
-    Vector2D getEdgeDefinedPoint(uint32_t edges, PHLWINDOW pWindow);
+    Vector2D getEdgeDefinedPoint(uint32_t edges, PHLWINDOWREF pWindow);
 
     // called on resize, or insert/removal of a new deco
     void        onWindowUpdate(PHLWINDOW pWindow);
     void        uncacheDecoration(IHyprWindowDecoration* deco);
-    SBoxExtents getWindowDecorationReserved(PHLWINDOW pWindow);
-    SBoxExtents getWindowDecorationExtents(PHLWINDOW pWindow, bool inputOnly = false);
+    SBoxExtents getWindowDecorationReserved(PHLWINDOWREF pWindow);
+    SBoxExtents getWindowDecorationExtents(PHLWINDOWREF pWindow, bool inputOnly = false);
     CBox        getBoxWithIncludedDecos(PHLWINDOW pWindow);
     void        repositionDeco(IHyprWindowDecoration* deco);
     CBox        getWindowDecorationBox(IHyprWindowDecoration* deco);
@@ -81,19 +80,24 @@ class CDecorationPositioner {
     };
 
     struct SWindowData {
-        Vector2D    lastWindowSize = {};
-        SBoxExtents reserved       = {};
-        SBoxExtents extents        = {};
-        bool        needsRecalc    = false;
+        Vector2D                                lastWindowSize         = {};
+        SBoxExtents                             reserved               = {};
+        SBoxExtents                             extents                = {};
+        SBoxExtents                             decorationExtents      = {};
+        SBoxExtents                             decorationInputExtents = {};
+        bool                                    needsRecalc            = false;
+        bool                                    needsDamageExtents     = true;
+        std::vector<UP<SWindowPositioningData>> positioningDatas;
     };
 
-    std::map<PHLWINDOWREF, SWindowData>                  m_mWindowDatas;
-    std::vector<std::unique_ptr<SWindowPositioningData>> m_vWindowPositioningDatas;
+    std::map<PHLWINDOWREF, SWindowData> m_windowDatas;
+    bool                                m_needsSanitize = false;
 
-    SWindowPositioningData*                              getDataFor(IHyprWindowDecoration* pDecoration, PHLWINDOW pWindow);
-    void                                                 onWindowUnmap(PHLWINDOW pWindow);
-    void                                                 onWindowMap(PHLWINDOW pWindow);
-    void                                                 sanitizeDatas();
+    SWindowPositioningData*             getDataFor(IHyprWindowDecoration* pDecoration, PHLWINDOW pWindow);
+    SBoxExtents                         computeWindowDecorationExtents(PHLWINDOWREF pWindow, bool inputOnly);
+    void                                onWindowUnmap(PHLWINDOW pWindow);
+    void                                onWindowMap(PHLWINDOW pWindow);
+    void                                sanitizeDatas();
 };
 
-inline std::unique_ptr<CDecorationPositioner> g_pDecorationPositioner;
+inline UP<CDecorationPositioner> g_pDecorationPositioner;

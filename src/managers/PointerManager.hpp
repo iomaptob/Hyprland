@@ -4,14 +4,17 @@
 #include "../devices/ITouch.hpp"
 #include "../devices/Tablet.hpp"
 #include "../helpers/math/Math.hpp"
-#include "../helpers/math/Math.hpp"
-#include "../desktop/WLSurface.hpp"
+#include "../desktop/view/WLSurface.hpp"
 #include "../helpers/sync/SyncTimeline.hpp"
+#include "../helpers/time/Time.hpp"
+#include "../helpers/signal/Signal.hpp"
 #include <tuple>
 
 class CMonitor;
 class IHID;
-class CTexture;
+namespace Render {
+    class ITexture;
+}
 
 AQUAMARINE_FORWARD(IBuffer);
 
@@ -40,29 +43,53 @@ class CPointerManager {
     void warpAbsolute(Vector2D abs, SP<IHID> dev);
 
     void setCursorBuffer(SP<Aquamarine::IBuffer> buf, const Vector2D& hotspot, const float& scale);
-    void setCursorSurface(SP<CWLSurface> buf, const Vector2D& hotspot);
+    void setCursorSurface(SP<Desktop::View::CWLSurface> buf, const Vector2D& hotspot);
     void resetCursorImage(bool apply = true);
 
-    void lockSoftwareForMonitor(SP<CMonitor> pMonitor);
-    void unlockSoftwareForMonitor(SP<CMonitor> pMonitor);
-    void lockSoftwareForMonitor(CMonitor* pMonitor);
-    void unlockSoftwareForMonitor(CMonitor* pMonitor);
+    void lockSoftwareForMonitor(PHLMONITOR pMonitor);
+    void unlockSoftwareForMonitor(PHLMONITOR pMonitor);
     void lockSoftwareAll();
     void unlockSoftwareAll();
-    bool softwareLockedFor(SP<CMonitor> pMonitor);
+    bool softwareLockedFor(PHLMONITOR pMonitor);
+    bool hasVisibleHWCursor(PHLMONITOR pMonitor);
 
-    void renderSoftwareCursorsFor(SP<CMonitor> pMonitor, timespec* now, CRegion& damage /* logical */, std::optional<Vector2D> overridePos = {} /* monitor-local */);
+    void renderSoftwareCursorsFor(PHLMONITOR pMonitor, const Time::steady_tp& now, CRegion& damage /* logical */, std::optional<Vector2D> overridePos = {} /* monitor-local */,
+                                  bool forceRender = false);
 
     // this is needed e.g. during screensharing where
     // the software cursors aren't locked during the cursor move, but they
     // are rendered later.
-    void damageCursor(SP<CMonitor> pMonitor);
+    void damageCursor(PHLMONITOR pMonitor, bool skipFrameSchedule = false);
 
     //
     Vector2D position();
+    Vector2D hotspot();
     Vector2D cursorSizeLogical();
 
     void     recheckEnteredOutputs();
+
+    // returns the thing in global coords
+    CBox getCursorBoxGlobal();
+
+    struct SCursorImage {
+        SP<Aquamarine::IBuffer>       pBuffer;
+        SP<Render::ITexture>          bufferTex;
+        WP<Desktop::View::CWLSurface> surface;
+
+        Vector2D                      hotspot;
+        Vector2D                      size;
+        float                         scale = 1.F;
+
+        CHyprSignalListener           destroySurface;
+        CHyprSignalListener           commitSurface;
+    };
+
+    const SCursorImage&  currentCursorImage();
+    SP<Render::ITexture> getCurrentCursorTexture();
+
+    struct {
+        CSignalT<> cursorChanged;
+    } m_events;
 
   private:
     void recheckPointerPosition();
@@ -77,15 +104,11 @@ class CPointerManager {
     Vector2D closestValid(const Vector2D& pos);
 
     // returns the thing in device coordinates. Is NOT offset by the hotspot, relies on set_cursor with hotspot.
-    Vector2D getCursorPosForMonitor(SP<CMonitor> pMonitor);
+    Vector2D getCursorPosForMonitor(PHLMONITOR pMonitor);
     // returns the thing in logical coordinates of the monitor
-    CBox getCursorBoxLogicalForMonitor(SP<CMonitor> pMonitor);
-    // returns the thing in global coords
-    CBox         getCursorBoxGlobal();
+    CBox     getCursorBoxLogicalForMonitor(PHLMONITOR pMonitor);
 
-    Vector2D     transformedHotspot(SP<CMonitor> pMonitor);
-
-    SP<CTexture> getCurrentCursorTexture();
+    Vector2D transformedHotspot(PHLMONITOR pMonitor);
 
     struct SPointerListener {
         CHyprSignalListener destroy;
@@ -108,7 +131,7 @@ class CPointerManager {
 
         WP<IPointer>        pointer;
     };
-    std::vector<SP<SPointerListener>> pointerListeners;
+    std::vector<SP<SPointerListener>> m_pointerListeners;
 
     struct STouchListener {
         CHyprSignalListener destroy;
@@ -120,7 +143,7 @@ class CPointerManager {
 
         WP<ITouch>          touch;
     };
-    std::vector<SP<STouchListener>> touchListeners;
+    std::vector<SP<STouchListener>> m_touchListeners;
 
     struct STabletListener {
         CHyprSignalListener destroy;
@@ -131,34 +154,21 @@ class CPointerManager {
 
         WP<CTablet>         tablet;
     };
-    std::vector<SP<STabletListener>> tabletListeners;
+    std::vector<SP<STabletListener>> m_tabletListeners;
 
     struct {
         std::vector<CBox> monitorBoxes;
-    } currentMonitorLayout;
+    } m_currentMonitorLayout;
 
-    struct {
-        SP<Aquamarine::IBuffer> pBuffer;
-        SP<CTexture>            bufferTex;
-        WP<CWLSurface>          surface;
+    SCursorImage m_currentCursorImage; // TODO: support various sizes per-output so we can have pixel-perfect cursors
 
-        Vector2D                hotspot;
-        Vector2D                size;
-        float                   scale = 1.F;
-
-        CHyprSignalListener     destroySurface;
-        CHyprSignalListener     commitSurface;
-        SP<CSyncTimeline>       waitTimeline = nullptr;
-        uint64_t                waitPoint    = 0;
-    } currentCursorImage; // TODO: support various sizes per-output so we can have pixel-perfect cursors
-
-    Vector2D pointerPos = {0, 0};
+    Vector2D     m_pointerPos = {0, 0};
 
     struct SMonitorPointerState {
-        SMonitorPointerState(SP<CMonitor> m) : monitor(m) {}
-        ~SMonitorPointerState() {}
+        SMonitorPointerState(const PHLMONITOR& m) : monitor(m) {}
+        ~SMonitorPointerState() = default;
 
-        WP<CMonitor>            monitor;
+        PHLMONITORREF           monitor;
 
         int                     softwareLocks  = 0;
         bool                    hardwareFailed = false;
@@ -170,16 +180,17 @@ class CPointerManager {
         SP<Aquamarine::IBuffer> cursorFrontBuffer;
     };
 
-    std::vector<SP<SMonitorPointerState>> monitorStates;
-    SP<SMonitorPointerState>              stateFor(SP<CMonitor> mon);
+    std::vector<SP<SMonitorPointerState>> m_monitorStates;
+    SP<SMonitorPointerState>              stateFor(PHLMONITOR mon);
     bool                                  attemptHardwareCursor(SP<SMonitorPointerState> state);
-    SP<Aquamarine::IBuffer>               renderHWCursorBuffer(SP<SMonitorPointerState> state, SP<CTexture> texture);
+    SP<Aquamarine::IBuffer>               renderHWCursorBuffer(SP<SMonitorPointerState> state, SP<Render::ITexture> texture);
     bool                                  setHWCursorBuffer(SP<SMonitorPointerState> state, SP<Aquamarine::IBuffer> buf);
 
     struct {
-        SP<HOOK_CALLBACK_FN> monitorAdded;
-        SP<HOOK_CALLBACK_FN> monitorPreRender;
-    } hooks;
+        CHyprSignalListener monitorAdded;
+        CHyprSignalListener monitorLayoutChanged;
+        CHyprSignalListener monitorPreRender;
+    } m_hooks;
 };
 
 inline UP<CPointerManager> g_pPointerManager;

@@ -1,6 +1,5 @@
 #pragma once
 
-#include <memory>
 #include <vector>
 #include <cstdint>
 #include "WaylandProtocol.hpp"
@@ -14,14 +13,13 @@ class CXDGActivationToken {
     bool good();
 
   private:
-    SP<CXdgActivationTokenV1> resource;
+    SP<CXdgActivationTokenV1> m_resource;
 
-    uint32_t                  serial    = 0;
-    std::string               appID     = "";
-    bool                      committed = false;
-    bool                      used      = false;
+    uint32_t                  m_serial    = 0;
+    std::string               m_appID     = "";
+    bool                      m_committed = false;
 
-    std::string               token = "";
+    std::string               m_token = "";
 
     friend class CXDGActivationProtocol;
 };
@@ -41,11 +39,11 @@ class CXDGActivationProtocol : public IWaylandProtocol {
         std::string token;
         wl_client*  client = nullptr; // READ-ONLY: can be dead
     };
-    std::vector<SSentToken> m_vSentTokens;
+    std::vector<SSentToken> m_sentTokens;
 
     //
-    std::vector<UP<CXdgActivationV1>>    m_vManagers;
-    std::vector<UP<CXDGActivationToken>> m_vTokens;
+    std::vector<UP<CXdgActivationV1>>    m_managers;
+    std::vector<UP<CXDGActivationToken>> m_tokens;
 
     friend class CXDGActivationToken;
 };

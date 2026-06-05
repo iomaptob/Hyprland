@@ -2,9 +2,13 @@
 
 #include "../helpers/AnimatedVariable.hpp"
 #include <string>
-#include "../defines.hpp"
 #include "DesktopTypes.hpp"
 #include "../helpers/MiscFunctions.hpp"
+#include "../helpers/signal/Signal.hpp"
+
+namespace Layout {
+    class CSpace;
+};
 
 enum eFullscreenMode : int8_t {
     FSMODE_NONE       = 0,
@@ -13,79 +17,87 @@ enum eFullscreenMode : int8_t {
     FSMODE_MAX        = (1 << 2) - 1
 };
 
-class CWindow;
-
 class CWorkspace {
   public:
-    static PHLWORKSPACE create(WORKSPACEID id, MONITORID monitorID, std::string name, bool special = false, bool isEmpty = true);
+    static PHLWORKSPACE create(WORKSPACEID id, PHLMONITOR monitor, std::string name, bool special = false, bool isEmpty = true);
     // use create() don't use this
-    CWorkspace(WORKSPACEID id, MONITORID monitorID, std::string name, bool special = false, bool isEmpty = true);
+    CWorkspace(WORKSPACEID id, PHLMONITOR monitor, std::string name, bool special = false, bool isEmpty = true);
     ~CWorkspace();
+
+    WP<CWorkspace>     m_self;
+
+    SP<Layout::CSpace> m_space;
 
     // Workspaces ID-based have IDs > 0
     // and workspaces name-based have IDs starting with -1337
-    WORKSPACEID m_iID        = WORKSPACE_INVALID;
-    std::string m_szName     = "";
-    MONITORID   m_iMonitorID = MONITOR_INVALID;
-    // Previous workspace ID and name is stored during a workspace change, allowing travel
-    // to the previous workspace.
-    SWorkspaceIDName m_sPrevWorkspace, m_sPrevWorkspacePerMonitor;
+    WORKSPACEID     m_id   = WORKSPACE_INVALID;
+    std::string     m_name = "";
+    PHLMONITORREF   m_monitor;
 
-    bool             m_bHasFullscreenWindow = false;
-    eFullscreenMode  m_efFullscreenMode     = FSMODE_NONE;
-
-    wl_array         m_wlrCoordinateArr;
+    bool            m_hasFullscreenWindow = false;
+    eFullscreenMode m_fullscreenMode      = FSMODE_NONE;
 
     // for animations
-    CAnimatedVariable<Vector2D> m_vRenderOffset;
-    CAnimatedVariable<float>    m_fAlpha;
-    bool                        m_bForceRendering = false;
+    PHLANIMVAR<Vector2D>       m_renderOffset;
+    PHLANIMVAR<float>          m_alpha;
+    bool                       m_forceRendering = false;
+    std::optional<std::string> m_animationStyle;
 
     // allows damage to propagate.
-    bool m_bVisible = false;
+    bool m_visible = false;
 
     // "scratchpad"
-    bool m_bIsSpecialWorkspace = false;
+    bool m_isSpecialWorkspace = false;
 
     // last window
-    PHLWINDOWREF m_pLastFocusedWindow;
-
-    // user-set
-    bool m_bDefaultFloating = false;
-    bool m_bDefaultPseudo   = false;
+    PHLWINDOWREF m_lastFocusedWindow;
 
     // last monitor (used on reconnect)
-    std::string m_szLastMonitor = "";
+    std::string m_lastMonitor = "";
 
-    bool        m_bWasCreatedEmpty = true;
-
-    bool        m_bPersistent = false;
+    bool        m_wasCreatedEmpty = true;
 
     // Inert: destroyed and invalid. If this is true, release the ptr you have.
-    bool             inert();
+    bool        inert();
+    MONITORID   monitorID();
+    PHLWINDOW   getLastFocusedWindow();
+    PHLWINDOW   getFocusCandidate();
+    std::string getConfigName();
+    bool        matchesStaticSelector(const std::string& selector);
+    void        markInert();
+    void        updateWindowDecos();
+    void        updateWindowData();
+    int         getWindows(std::optional<bool> onlyTiled = {}, std::optional<bool> onlyPinned = {}, std::optional<bool> onlyVisible = {});
+    int         getGroups(std::optional<bool> onlyTiled = {}, std::optional<bool> onlyPinned = {}, std::optional<bool> onlyVisible = {});
+    bool        hasUrgentWindow();
+    PHLWINDOW   getFirstWindow();
+    PHLWINDOW   getTopLeftWindow();
+    PHLWINDOW   getFullscreenWindow();
+    bool        hasFullscreen();
+    bool        isVisible();
+    bool        isVisibleNotCovered();
+    void        rename(const std::string& name = "");
+    void        forceReportSizesToWindows();
+    void        updateWindows();
+    void        setPersistent(bool persistent);
+    bool        isPersistent();
+    void        setNoMembersAboveFullscreen();
 
-    void             startAnim(bool in, bool left, bool instant = false);
-    void             setActive(bool on);
-
-    void             moveToMonitor(const MONITORID&);
-
-    PHLWINDOW        getLastFocusedWindow();
-    void             rememberPrevWorkspace(const PHLWORKSPACE& prevWorkspace);
-
-    std::string      getConfigName();
-
-    bool             matchesStaticSelector(const std::string& selector);
-
-    void             markInert();
-
-    SWorkspaceIDName getPrevWorkspaceIDName(bool perMonitor) const;
+    struct {
+        CSignalT<> destroy;
+        CSignalT<> renamed;
+        CSignalT<> monitorChanged;
+        CSignalT<> activeChanged;
+    } m_events;
 
   private:
-    void                 init(PHLWORKSPACE self);
+    void                init(PHLWORKSPACE self);
 
-    SP<HOOK_CALLBACK_FN> m_pFocusedWindowHook;
-    bool                 m_bInert = true;
-    WP<CWorkspace>       m_pSelf;
+    CHyprSignalListener m_focusedWindowHook;
+    bool                m_inert = true;
+
+    SP<CWorkspace>      m_selfPersistent; // for persistent workspaces.
+    bool                m_persistent = false;
 };
 
 inline bool valid(const PHLWORKSPACE& ref) {

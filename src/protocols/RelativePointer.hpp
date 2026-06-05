@@ -1,6 +1,5 @@
 #pragma once
 
-#include <memory>
 #include <vector>
 #include <cstdint>
 #include "WaylandProtocol.hpp"
@@ -12,13 +11,14 @@ class CRelativePointer {
     CRelativePointer(SP<CZwpRelativePointerV1> resource_);
 
     void       sendRelativeMotion(uint64_t time, const Vector2D& delta, const Vector2D& deltaUnaccel);
+    void       sendRelativeMotion(uint32_t timeHi, uint32_t timeLo, wl_fixed_t dx, wl_fixed_t dy, wl_fixed_t dxUnaccel, wl_fixed_t dyUnaccel);
 
     bool       good();
     wl_client* client();
 
   private:
-    SP<CZwpRelativePointerV1> resource;
-    wl_client*                pClient = nullptr;
+    SP<CZwpRelativePointerV1> m_resource;
+    wl_client*                m_client = nullptr;
 };
 
 class CRelativePointerProtocol : public IWaylandProtocol {
@@ -35,8 +35,8 @@ class CRelativePointerProtocol : public IWaylandProtocol {
     void onGetRelativePointer(CZwpRelativePointerManagerV1* pMgr, uint32_t id, wl_resource* pointer);
 
     //
-    std::vector<UP<CZwpRelativePointerManagerV1>> m_vManagers;
-    std::vector<UP<CRelativePointer>>             m_vRelativePointers;
+    std::vector<UP<CZwpRelativePointerManagerV1>> m_managers;
+    std::vector<UP<CRelativePointer>>             m_relativePointers;
 
     friend class CRelativePointer;
 };

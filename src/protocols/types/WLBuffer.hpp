@@ -1,6 +1,5 @@
 #pragma once
 
-#include <memory>
 #include <vector>
 #include <cstdint>
 #include "../WaylandProtocol.hpp"
@@ -12,21 +11,21 @@ class CWLSurfaceResource;
 
 class CWLBufferResource {
   public:
-    static SP<CWLBufferResource> create(SP<CWlBuffer> resource);
+    static SP<CWLBufferResource> create(WP<CWlBuffer> resource);
     static SP<CWLBufferResource> fromResource(wl_resource* res);
 
     bool                         good();
     void                         sendRelease();
     wl_resource*                 getResource();
 
-    WP<IHLBuffer>                buffer;
+    WP<IHLBuffer>                m_buffer;
 
-    WP<CWLBufferResource>        self;
+    WP<CWLBufferResource>        m_self;
 
   private:
-    CWLBufferResource(SP<CWlBuffer> resource_);
+    CWLBufferResource(WP<CWlBuffer> resource_);
 
-    SP<CWlBuffer> resource;
+    SP<CWlBuffer> m_resource;
 
     friend class IHLBuffer;
 };

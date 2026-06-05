@@ -1,9 +1,9 @@
 #pragma once
 
-#include <memory>
 #include <vector>
 #include <unordered_map>
 #include "WaylandProtocol.hpp"
+#include "../desktop/DesktopTypes.hpp"
 #include "ext-foreign-toplevel-list-v1.hpp"
 
 class CForeignToplevelHandle {
@@ -14,11 +14,12 @@ class CForeignToplevelHandle {
     PHLWINDOW window();
 
   private:
-    SP<CExtForeignToplevelHandleV1> resource;
-    PHLWINDOWREF                    pWindow;
-    bool                            closed = false;
+    SP<CExtForeignToplevelHandleV1> m_resource;
+    PHLWINDOWREF                    m_window;
+    bool                            m_closed = false;
 
     friend class CForeignToplevelList;
+    friend class CForeignToplevelProtocol;
 };
 
 class CForeignToplevelList {
@@ -33,12 +34,12 @@ class CForeignToplevelList {
     bool good();
 
   private:
-    SP<CExtForeignToplevelListV1>           resource;
-    bool                                    finished = false;
+    SP<CExtForeignToplevelListV1>           m_resource;
+    bool                                    m_finished = false;
 
     SP<CForeignToplevelHandle>              handleForWindow(PHLWINDOW pWindow);
 
-    std::vector<WP<CForeignToplevelHandle>> handles;
+    std::vector<WP<CForeignToplevelHandle>> m_handles;
 };
 
 class CForeignToplevelProtocol : public IWaylandProtocol {
@@ -46,14 +47,16 @@ class CForeignToplevelProtocol : public IWaylandProtocol {
     CForeignToplevelProtocol(const wl_interface* iface, const int& ver, const std::string& name);
 
     virtual void bindManager(wl_client* client, void* data, uint32_t ver, uint32_t id);
+    PHLWINDOW    windowFromHandleResource(wl_resource* res);
 
   private:
     void onManagerResourceDestroy(CForeignToplevelList* mgr);
     void destroyHandle(CForeignToplevelHandle* handle);
+    bool windowValidForForeign(PHLWINDOW pWindow);
 
     //
-    std::vector<UP<CForeignToplevelList>>   m_vManagers;
-    std::vector<SP<CForeignToplevelHandle>> m_vHandles;
+    std::vector<UP<CForeignToplevelList>>   m_managers;
+    std::vector<SP<CForeignToplevelHandle>> m_handles;
 
     friend class CForeignToplevelList;
     friend class CForeignToplevelHandle;

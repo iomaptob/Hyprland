@@ -6,21 +6,21 @@
 
 class CMonitor;
 class CXDGOutputProtocol;
+class CWLOutputProtocol;
 
 class CXDGOutput {
   public:
-    CXDGOutput(SP<CZxdgOutputV1> resource, CMonitor* monitor_);
+    CXDGOutput(SP<CZxdgOutputV1> resource, PHLMONITOR monitor_);
 
     void sendDetails();
 
   private:
-    CMonitor*               monitor = nullptr;
-    SP<CZxdgOutputV1>       resource;
+    PHLMONITORREF         m_monitor;
+    SP<CZxdgOutputV1>     m_resource;
+    WP<CWLOutputProtocol> m_outputProto;
 
-    std::optional<Vector2D> overridePosition;
-
-    wl_client*              client     = nullptr;
-    bool                    isXWayland = false;
+    wl_client*            m_client     = nullptr;
+    bool                  m_isXWayland = false;
 
     friend class CXDGOutputProtocol;
 };
@@ -30,16 +30,16 @@ class CXDGOutputProtocol : public IWaylandProtocol {
     CXDGOutputProtocol(const wl_interface* iface, const int& ver, const std::string& name);
 
     virtual void bindManager(wl_client* client, void* data, uint32_t ver, uint32_t id);
+    void         updateAllOutputs();
 
   private:
     void onManagerResourceDestroy(wl_resource* res);
     void onOutputResourceDestroy(wl_resource* res);
     void onManagerGetXDGOutput(CZxdgOutputManagerV1* mgr, uint32_t id, wl_resource* outputResource);
-    void updateAllOutputs();
 
     //
-    std::vector<UP<CZxdgOutputManagerV1>> m_vManagerResources;
-    std::vector<UP<CXDGOutput>>           m_vXDGOutputs;
+    std::vector<UP<CZxdgOutputManagerV1>> m_managerResources;
+    std::vector<UP<CXDGOutput>>           m_xdgOutputs;
 
     friend class CXDGOutput;
 };

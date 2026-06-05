@@ -9,7 +9,9 @@
 #include <any>
 
 class CInputManager;
-class CHyprRenderer;
+namespace Render {
+    class IHyprRenderer;
+}
 class CTextInputV1;
 class CInputMethodV2;
 
@@ -30,7 +32,6 @@ class CInputMethodRelay {
 
     CTextInput*        getFocusedTextInput();
 
-    void               setIMEPopupFocus(CInputPopup*, SP<CWLSurfaceResource>);
     void               removePopup(CInputPopup*);
 
     CInputPopup*       popupFromCoords(const Vector2D& point);
@@ -38,13 +39,13 @@ class CInputMethodRelay {
 
     void               updateAllPopups();
 
-    WP<CInputMethodV2> m_pIME;
+    WP<CInputMethodV2> m_inputMethod;
 
   private:
-    std::vector<std::unique_ptr<CTextInput>>  m_vTextInputs;
-    std::vector<std::unique_ptr<CInputPopup>> m_vIMEPopups;
+    std::vector<UP<CTextInput>>  m_textInputs;
+    std::vector<UP<CInputPopup>> m_inputMethodPopups;
 
-    WP<CWLSurfaceResource>                    m_pLastKbFocus;
+    WP<CWLSurfaceResource>       m_lastKbFocus;
 
     struct {
         CHyprSignalListener newTIV3;
@@ -53,11 +54,10 @@ class CInputMethodRelay {
         CHyprSignalListener commitIME;
         CHyprSignalListener destroyIME;
         CHyprSignalListener newPopup;
-    } listeners;
+    } m_listeners;
 
-    friend class CHyprRenderer;
+    friend class Render::IHyprRenderer;
     friend class CInputManager;
     friend class CTextInputV1ProtocolManager;
     friend class CTextInput;
-    friend class CHyprRenderer;
 };

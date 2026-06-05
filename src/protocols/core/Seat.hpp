@@ -8,11 +8,11 @@
      - wl_touch
 */
 
-#include <memory>
 #include <vector>
 #include <cstdint>
 #include "../WaylandProtocol.hpp"
 #include <wayland-server-protocol.h>
+#include <wayland-util.h>
 #include "wayland.hpp"
 #include "../../helpers/signal/Signal.hpp"
 #include "../../helpers/math/Math.hpp"
@@ -39,7 +39,7 @@ class CCursorSurfaceRole : public ISurfaceRole {
     static std::vector<uint8_t>& cursorPixelData(SP<CWLSurfaceResource> surface);
 
   private:
-    std::vector<uint8_t> cursorShmPixelData;
+    std::vector<uint8_t> m_cursorShmPixelData;
 };
 
 class CWLTouchResource {
@@ -55,24 +55,26 @@ class CWLTouchResource {
     void                sendShape(int32_t id, const Vector2D& shape);
     void                sendOrientation(int32_t id, double angle);
 
-    WP<CWLSeatResource> owner;
+    WP<CWLSeatResource> m_owner;
 
   private:
-    SP<CWlTouch>           resource;
-    WP<CWLSurfaceResource> currentSurface;
+    SP<CWlTouch>           m_resource;
+    WP<CWLSurfaceResource> m_currentSurface;
 
-    int                    fingers = 0;
+    int                    m_fingers = 0;
 
     struct {
         CHyprSignalListener destroySurface;
-    } listeners;
+    } m_listeners;
 };
 
 class CWLPointerResource {
   public:
     CWLPointerResource(SP<CWlPointer> resource_, SP<CWLSeatResource> owner_);
+    ~CWLPointerResource();
 
     bool                good();
+    int                 version();
     void                sendEnter(SP<CWLSurfaceResource> surface, const Vector2D& local);
     void                sendLeave();
     void                sendMotion(uint32_t timeMs, const Vector2D& local);
@@ -85,17 +87,29 @@ class CWLPointerResource {
     void                sendAxisValue120(wl_pointer_axis axis, int32_t value120);
     void                sendAxisRelativeDirection(wl_pointer_axis axis, wl_pointer_axis_relative_direction direction);
 
-    WP<CWLSeatResource> owner;
+    WP<CWLSeatResource> m_owner;
+
+    struct {
+        CSignalT<> destroyed;
+    } m_events;
+
+    //
+    static SP<CWLPointerResource> fromResource(wl_resource* res);
 
   private:
-    SP<CWlPointer>         resource;
-    WP<CWLSurfaceResource> currentSurface;
+    SP<CWlPointer>         m_resource;
+    WP<CWLSurfaceResource> m_currentSurface;
+    WP<CWLPointerResource> m_self;
 
-    std::vector<uint32_t>  pressedButtons;
+    std::vector<uint32_t>  m_pressedButtons;
+
+    Vector2D               fixPosWithWlFixed(const Vector2D& pos);
 
     struct {
         CHyprSignalListener destroySurface;
-    } listeners;
+    } m_listeners;
+
+    friend class CWLSeatResource;
 };
 
 class CWLKeyboardResource {
@@ -104,21 +118,25 @@ class CWLKeyboardResource {
 
     bool                good();
     void                sendKeymap(SP<IKeyboard> keeb);
-    void                sendEnter(SP<CWLSurfaceResource> surface);
+    void                sendEnter(SP<CWLSurfaceResource> surface, wl_array* keys);
     void                sendLeave();
     void                sendKey(uint32_t timeMs, uint32_t key, wl_keyboard_key_state state);
     void                sendMods(uint32_t depressed, uint32_t latched, uint32_t locked, uint32_t group);
     void                repeatInfo(uint32_t rate, uint32_t delayMs);
 
-    WP<CWLSeatResource> owner;
+    WP<CWLSeatResource> m_owner;
 
   private:
-    SP<CWlKeyboard>        resource;
-    WP<CWLSurfaceResource> currentSurface;
+    SP<CWlKeyboard>        m_resource;
+    WP<CWLSurfaceResource> m_currentSurface;
 
     struct {
         CHyprSignalListener destroySurface;
-    } listeners;
+    } m_listeners;
+
+    std::string m_lastKeymap  = "<none>";
+    uint32_t    m_lastRate    = 0;
+    uint32_t    m_lastDelayMs = 0;
 };
 
 class CWLSeatResource {
@@ -131,19 +149,19 @@ class CWLSeatResource {
     bool                                 good();
     wl_client*                           client();
 
-    std::vector<WP<CWLPointerResource>>  pointers;
-    std::vector<WP<CWLKeyboardResource>> keyboards;
-    std::vector<WP<CWLTouchResource>>    touches;
+    std::vector<WP<CWLPointerResource>>  m_pointers;
+    std::vector<WP<CWLKeyboardResource>> m_keyboards;
+    std::vector<WP<CWLTouchResource>>    m_touches;
 
-    WP<CWLSeatResource>                  self;
+    WP<CWLSeatResource>                  m_self;
 
     struct {
-        CSignal destroy;
-    } events;
+        CSignalT<> destroy;
+    } m_events;
 
   private:
-    SP<CWlSeat> resource;
-    wl_client*  pClient = nullptr;
+    SP<CWlSeat> m_resource;
+    wl_client*  m_client = nullptr;
 };
 
 class CWLSeatProtocol : public IWaylandProtocol {
@@ -153,8 +171,8 @@ class CWLSeatProtocol : public IWaylandProtocol {
     virtual void bindManager(wl_client* client, void* data, uint32_t ver, uint32_t id);
 
     struct {
-        CSignal newSeatResource; // SP<CWLSeatResource>
-    } events;
+        CSignalT<SP<CWLSeatResource>> newSeatResource;
+    } m_events;
 
   private:
     void updateCapabilities(uint32_t caps); // in IHID caps
@@ -167,15 +185,15 @@ class CWLSeatProtocol : public IWaylandProtocol {
     void destroyResource(CWLPointerResource* resource);
 
     //
-    std::vector<SP<CWLSeatResource>>     m_vSeatResources;
-    std::vector<SP<CWLKeyboardResource>> m_vKeyboards;
-    std::vector<SP<CWLTouchResource>>    m_vTouches;
-    std::vector<SP<CWLPointerResource>>  m_vPointers;
+    std::vector<SP<CWLSeatResource>>     m_seatResources;
+    std::vector<SP<CWLKeyboardResource>> m_keyboards;
+    std::vector<SP<CWLTouchResource>>    m_touches;
+    std::vector<SP<CWLPointerResource>>  m_pointers;
 
     SP<CWLSeatResource>                  seatResourceForClient(wl_client* client);
 
     //
-    uint32_t currentCaps = 0;
+    uint32_t m_currentCaps = 0;
 
     friend class CWLSeatResource;
     friend class CWLKeyboardResource;

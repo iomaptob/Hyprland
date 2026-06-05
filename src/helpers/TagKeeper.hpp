@@ -5,11 +5,12 @@
 
 class CTagKeeper {
   public:
-    bool               isTagged(const std::string& tag, bool strict = false);
-    bool               applyTag(const std::string& tag, bool dynamic = false);
-    bool               removeDynamicTags();
+    bool        isTagged(const std::string& tag, bool strict = false) const;
+    bool        applyTag(const std::string& tag, bool dynamic = false);
+    bool        removeDynamicTag(const std::string& tag);
+    bool        clearTags();
 
-    inline const auto& getTags() {
+    const auto& getTags() const {
         return m_tags;
     };
 

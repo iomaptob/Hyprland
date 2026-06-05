@@ -1,6 +1,5 @@
 #pragma once
 
-#include <memory>
 #include <vector>
 #include <unordered_map>
 #include "WaylandProtocol.hpp"
@@ -17,8 +16,8 @@ class CXDGDialogV1Resource {
     bool modal = false;
 
   private:
-    SP<CXdgDialogV1>         resource;
-    WP<CXDGToplevelResource> toplevel;
+    SP<CXdgDialogV1>         m_resource;
+    WP<CXDGToplevelResource> m_toplevel;
 
     void                     updateWindow();
 };
@@ -30,7 +29,7 @@ class CXDGWmDialogManagerResource {
     bool good();
 
   private:
-    SP<CXdgWmDialogV1> resource;
+    SP<CXdgWmDialogV1> m_resource;
 };
 
 class CXDGDialogProtocol : public IWaylandProtocol {
@@ -45,8 +44,8 @@ class CXDGDialogProtocol : public IWaylandProtocol {
     void destroyResource(CXDGDialogV1Resource* res);
 
     //
-    std::vector<SP<CXDGWmDialogManagerResource>> m_vManagers;
-    std::vector<SP<CXDGDialogV1Resource>>        m_vDialogs;
+    std::vector<SP<CXDGWmDialogManagerResource>> m_managers;
+    std::vector<SP<CXDGDialogV1Resource>>        m_dialogs;
 
     friend class CXDGWmDialogManagerResource;
     friend class CXDGDialogV1Resource;

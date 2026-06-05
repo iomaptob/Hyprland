@@ -1,7 +1,6 @@
 #pragma once
 
 #include "../defines.hpp"
-#include "../helpers/Monitor.hpp"
 #include "../helpers/memory/Memory.hpp"
 #include "../helpers/signal/Signal.hpp"
 #include <unordered_map>
@@ -11,10 +10,12 @@ class CProtocolManager {
     CProtocolManager();
     ~CProtocolManager();
 
-  private:
-    std::unordered_map<std::string, CHyprSignalListener> m_mModeChangeListeners;
+    bool isGlobalPrivileged(const wl_global* global);
 
-    void                                                 onMonitorModeChange(CMonitor* pMonitor);
+  private:
+    std::unordered_map<std::string, CHyprSignalListener> m_modeChangeListeners;
+
+    void                                                 onMonitorModeChange(PHLMONITOR pMonitor);
 };
 
-inline std::unique_ptr<CProtocolManager> g_pProtocolManager;
+inline UP<CProtocolManager> g_pProtocolManager;

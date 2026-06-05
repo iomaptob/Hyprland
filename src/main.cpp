@@ -1,11 +1,18 @@
 #include "defines.hpp"
-#include "debug/Log.hpp"
+#include "debug/log/Logger.hpp"
 #include "Compositor.hpp"
-#include "config/ConfigManager.hpp"
+#include "config/legacy/ConfigManager.hpp"
 #include "init/initHelpers.hpp"
+#include "debug/HyprCtl.hpp"
+#include "helpers/env/Env.hpp"
 
+#include <csignal>
+#include <cstdio>
 #include <hyprutils/string/String.hpp>
+#include <hyprutils/memory/Casts.hpp>
+#include <print>
 using namespace Hyprutils::String;
+using namespace Hyprutils::Memory;
 
 #include <fcntl.h>
 #include <iostream>
@@ -13,17 +20,35 @@ using namespace Hyprutils::String;
 #include <vector>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+#include <span>
 #include <filesystem>
 
-void help() {
-    std::cout << "usage: Hyprland [arg [...]].\n";
-    std::cout << "\nArguments:\n";
-    std::cout << "  --help              -h       - Show this message again\n";
-    std::cout << "  --config FILE       -c FILE  - Specify config file to use\n";
-    std::cout << "  --socket NAME                - Sets the Wayland socket name (for Wayland socket handover)\n";
-    std::cout << "  --wayland-fd FD              - Sets the Wayland socket fd (for Wayland socket handover)\n";
-    std::cout << "  --i-am-really-stupid         - Omits root user privileges check (why would you do that?)\n";
-    std::cout << "  --version           -v       - Print this binary's version\n";
+static void help() {
+    std::println("usage: Hyprland [arg [...]].\n");
+    std::println(R"#(Arguments:
+    --help              -h       - Show this message again
+    --config FILE       -c FILE  - Specify config file to use
+    --socket NAME                - Sets the Wayland socket name (for Wayland socket handover)
+    --wayland-fd FD              - Sets the Wayland socket fd (for Wayland socket handover)
+    --watchdog-fd FD             - Used by start-hyprland
+    --safe-mode                  - Starts Hyprland in safe mode
+    --systeminfo                 - Prints system infos
+    --i-am-really-stupid         - Omits root user privileges check (why would you do that?)
+    --verify-config              - Do not run Hyprland, only print if the config has any errors
+    --version           -v       - Print this binary's version
+    --version-json               - Print this binary's version as json)#");
+}
+
+static void reapZombieChildrenAutomatically() {
+    struct sigaction act;
+    act.sa_handler = SIG_DFL;
+    sigemptyset(&act.sa_mask);
+    act.sa_flags = SA_NOCLDWAIT;
+#ifdef SA_RESTORER
+    act.sa_restorer = NULL;
+#endif
+    sigaction(SIGCHLD, &act, nullptr);
 }
 
 int main(int argc, char** argv) {
@@ -32,156 +57,227 @@ int main(int argc, char** argv) {
         throwError("XDG_RUNTIME_DIR is not set!");
 
     // export HYPRLAND_CMD
-    std::string cmd = "";
-    for (auto i = 0; i < argc; ++i)
-        cmd += std::string(i == 0 ? "" : " ") + argv[i];
+    std::string cmd = argv[0];
+    for (int i = 1; i < argc; ++i)
+        cmd += std::string(" ") + argv[i];
 
     setenv("HYPRLAND_CMD", cmd.c_str(), 1);
     setenv("XDG_BACKEND", "wayland", 1);
+    setenv("XDG_SESSION_TYPE", "wayland", 1);
     setenv("_JAVA_AWT_WM_NONREPARENTING", "1", 1);
     setenv("MOZ_ENABLE_WAYLAND", "1", 1);
 
     // parse some args
-    std::string              configPath;
-    std::string              socketName;
-    int                      socketFd   = -1;
-    bool                     ignoreSudo = false;
+    std::string configPath;
+    std::string socketName;
+    int         socketFd   = -1;
+    bool        ignoreSudo = false, verifyConfig = false, safeMode = false;
+    int         watchdogFd = -1;
 
-    std::vector<std::string> args{argv + 1, argv + argc};
+    if (argc > 1) {
+        std::span<char*> args{argv + 1, sc<std::size_t>(argc - 1)};
 
-    for (auto it = args.begin(); it != args.end(); it++) {
-        if (it->compare("--i-am-really-stupid") == 0 && !ignoreSudo) {
-            std::cout << "[ WARNING ] Running Hyprland with superuser privileges might damage your system\n";
+        for (auto it = args.begin(); it != args.end(); it++) {
+            std::string_view value = *it;
 
-            ignoreSudo = true;
-        } else if (it->compare("--socket") == 0) {
-            if (std::next(it) == args.end()) {
-                help();
+            if (value == "--i-am-really-stupid" && !ignoreSudo) {
+                std::println("[ WARNING ] Running Hyprland with superuser privileges might damage your system");
 
-                return 1;
-            }
+                ignoreSudo = true;
+            } else if (value == "--socket") {
+                if (std::next(it) == args.end()) {
+                    help();
 
-            socketName = *std::next(it);
-            it++;
-        } else if (it->compare("--wayland-fd") == 0) {
-            if (std::next(it) == args.end()) {
-                help();
-
-                return 1;
-            }
-
-            try {
-                socketFd = std::stoi(std::next(it)->c_str());
-
-                // check if socketFd is a valid file descriptor
-                if (fcntl(socketFd, F_GETFD) == -1)
-                    throw std::exception();
-            } catch (...) {
-                std::cerr << "[ ERROR ] Invalid Wayland FD!\n";
-                help();
-
-                return 1;
-            }
-
-            it++;
-        } else if (it->compare("-c") == 0 || it->compare("--config") == 0) {
-            if (std::next(it) == args.end()) {
-                help();
-
-                return 1;
-            }
-            configPath = std::next(it)->c_str();
-
-            try {
-                configPath = std::filesystem::canonical(configPath);
-
-                if (!std::filesystem::is_regular_file(configPath)) {
-                    throw std::exception();
+                    return 1;
                 }
-            } catch (...) {
-                std::cerr << "[ ERROR ] Config file '" << configPath << "' doesn't exist!\n";
+
+                socketName = *std::next(it);
+                it++;
+            } else if (value == "--wayland-fd") {
+                if (std::next(it) == args.end()) {
+                    help();
+
+                    return 1;
+                }
+
+                const auto FD_STR = *std::next(it);
+                try {
+                    socketFd = std::stoi(FD_STR);
+
+                    // check if socketFd is a valid file descriptor
+                    if (fcntl(socketFd, F_GETFD) == -1)
+                        throw std::runtime_error("invalid or closed file descriptor");
+                } catch (const std::exception& e) {
+                    std::println(stderr, "[ ERROR ] (main.cpp:{}) | Invalid Wayland FD '{}': {}!", __LINE__, FD_STR, e.what());
+                    help();
+
+                    return 1;
+                }
+
+                it++;
+            } else if (value == "-c" || value == "--config") {
+                if (std::next(it) == args.end()) {
+                    help();
+
+                    return 1;
+                }
+                configPath = *std::next(it);
+
+                try {
+                    const auto ABS_PATH = std::filesystem::canonical(configPath);
+
+                    if (!std::filesystem::is_regular_file(ABS_PATH)) {
+                        throw std::runtime_error("not a regular file");
+                    }
+                    configPath = ABS_PATH;
+                } catch (const std::exception& e) {
+                    std::println(stderr, "[ ERROR ] (main.cpp:{}) | Config file '{}' is invalid: {}!", __LINE__, configPath, e.what());
+                    help();
+
+                    return 1;
+                }
+
+                Log::logger->log(Log::DEBUG, "User-specified config location: '{}'", configPath);
+
+                it++;
+
+                continue;
+            } else if (value == "-h" || value == "--help") {
+                help();
+
+                return 0;
+            } else if (value == "-v" || value == "--version") {
+                std::println("{}", versionRequest(eHyprCtlOutputFormat::FORMAT_NORMAL, ""));
+                return 0;
+            } else if (value == "--version-json") {
+                std::println("{}", versionRequest(eHyprCtlOutputFormat::FORMAT_JSON, ""));
+                return 0;
+            } else if (value == "--systeminfo") {
+                std::println("{}", systemInfoRequest(eHyprCtlOutputFormat::FORMAT_NORMAL, ""));
+                return 0;
+            } else if (value == "--verify-config") {
+                verifyConfig = true;
+                continue;
+            } else if (value == "--safe-mode") {
+                safeMode = true;
+                continue;
+            } else if (value == "--watchdog-fd") {
+                if (std::next(it) == args.end()) {
+                    help();
+                    return 1;
+                }
+
+                const auto WATCHDOG_STR = *std::next(it);
+                try {
+                    watchdogFd = std::stoi(WATCHDOG_STR);
+                    it++;
+                } catch (const std::exception& e) {
+                    std::println(stderr, "[ ERROR ] (main.cpp:{}) | Invalid watchdog FD '{}': {}!", __LINE__, WATCHDOG_STR, e.what());
+                    help();
+                    return 1;
+                }
+            } else {
+                std::println(stderr, "[ ERROR ] Unknown option '{}' !", value);
                 help();
 
                 return 1;
             }
-
-            Debug::log(LOG, "User-specified config location: '{}'", configPath);
-
-            it++;
-
-            continue;
-        } else if (it->compare("-h") == 0 || it->compare("--help") == 0) {
-            help();
-
-            return 0;
-        } else if (it->compare("-v") == 0 || it->compare("--version") == 0) {
-            auto commitMsg = trim(GIT_COMMIT_MESSAGE);
-            std::replace(commitMsg.begin(), commitMsg.end(), '#', ' ');
-            std::string result = "Hyprland, built from branch " + std::string(GIT_BRANCH) + " at commit " + GIT_COMMIT_HASH + " " + GIT_DIRTY + " (" + commitMsg +
-                ").\nDate: " + GIT_COMMIT_DATE + "\nTag: " + GIT_TAG + ", commits: " + GIT_COMMITS + std::string{"\nbuilt against aquamarine "} + AQUAMARINE_VERSION + "\n" +
-                "\n\nflags: (if any)\n";
-
-#ifdef LEGACY_RENDERER
-            result += "legacyrenderer\n";
-#endif
-#ifndef ISDEBUG
-            result += "debug\n";
-#endif
-#ifdef NO_XWAYLAND
-            result += "no xwayland\n";
-#endif
-
-            std::cout << result;
-            return 0;
-        } else {
-            std::cerr << "[ ERROR ] Unknown option '" << it->c_str() << "'!\n";
-            help();
-
-            return 1;
         }
     }
 
-    if (!ignoreSudo && Init::isSudo()) {
-        std::cerr << "[ ERROR ] Hyprland was launched with superuser privileges, but the privileges check is not omitted.\n";
-        std::cerr << "          Hint: Use the --i-am-really-stupid flag to omit that check.\n";
+    if (!ignoreSudo && NInit::isSudo()) {
+        std::println(stderr,
+                     "[ ERROR ] Hyprland was launched with superuser privileges, but the privileges check is not omitted.\n"
+                     "          Hint: Use the --i-am-really-stupid flag to omit that check.");
 
         return 1;
-    } else if (ignoreSudo && Init::isSudo()) {
-        std::cout << "Superuser privileges check is omitted. I hope you know what you're doing.\n";
-    }
+    } else if (ignoreSudo && NInit::isSudo())
+        std::println("Superuser privileges check is omitted. I hope you know what you're doing.");
 
     if (socketName.empty() ^ (socketFd == -1)) {
-        std::cerr << "[ ERROR ] Hyprland was launched with only one of --socket and --wayland-fd.\n";
-        std::cerr << "          Hint: Pass both --socket and --wayland-fd to perform Wayland socket handover.\n";
+        std::println(stderr,
+                     "[ ERROR ] Hyprland was launched with only one of --socket and --wayland-fd.\n"
+                     "          Hint: Pass both --socket and --wayland-fd to perform Wayland socket handover.");
 
         return 1;
     }
 
-    std::cout << "Welcome to Hyprland!\n";
+    if (!verifyConfig) {
+        std::println("Welcome to Hyprland!");
+        std::println(R"#(
+                                                  
+                     YY    UJ                     
+                    YYY    UUJ                    
+                   XXXY    UUUU                   
+                  zXXXX    UUUUU                  
+                zzzzX        UUUUJ                
+               cczzz          UUUUJ               
+             vccccz            UUUUUJ             
+            vvcccc              UUUUUJ            
+           vvvvv                  UUUUJ           
+          uuuvv                    UUUUJ          
+         uuuuu                      UUUUU         
+        nnnuu                        UUUUU        
+       nnnnn                          YUUUU       
+       xxnn                            YUUU       
+       xxxn                            YYUU       
+      xxxx                              YYUU      
+      rxxx                              YYYY      
+      rrrx                              YYYY      
+       rrrx                            XXXY       
+       rrrr                            XXXX       
+        rrrr                          zzXX        
+         rrrr                        zzzz         
+          rrrrr                    ccczz          
+           rrrrrx                vccccc           
+             rrrrxxxx        uuvvvvvc             
+                rrxxxxxxnnnnuuuuuv                
+                    xxxxxnnnnu                    
+
+
+)#");
+    }
 
     // let's init the compositor.
     // it initializes basic Wayland stuff in the constructor.
     try {
-        g_pCompositor                     = std::make_unique<CCompositor>();
-        g_pCompositor->explicitConfigPath = configPath;
-    } catch (std::exception& e) {
-        std::cout << "Hyprland threw in ctor: " << e.what() << "\nCannot continue.\n";
+        g_pCompositor                       = makeUnique<CCompositor>(verifyConfig);
+        g_pCompositor->m_explicitConfigPath = configPath;
+    } catch (const std::exception& e) {
+        std::println(stderr, "Hyprland threw in ctor: {}\nCannot continue.", e.what());
         return 1;
     }
 
+    reapZombieChildrenAutomatically();
+
+    bool watchdogOk = watchdogFd > 0;
+
+    if (watchdogFd > 0)
+        watchdogOk = g_pCompositor->setWatchdogFd(watchdogFd);
+    if (safeMode)
+        g_pCompositor->m_safeMode = true;
+
+    if (!watchdogOk && !verifyConfig)
+        Log::logger->log(Log::WARN, "WARNING: Hyprland is being launched without start-hyprland. This is highly advised against.");
+
     g_pCompositor->initServer(socketName, socketFd);
 
-    if (!envEnabled("HYPRLAND_NO_RT"))
-        Init::gainRealTime();
+    if (verifyConfig)
+        return !Config::mgr()->configVerifPassed();
 
-    Debug::log(LOG, "Hyprland init finished.");
+    if (!Env::envEnabled("HYPRLAND_NO_RT"))
+        NInit::gainRealTime();
+
+    Log::logger->log(Log::DEBUG, "Hyprland init finished.");
 
     // If all's good to go, start.
     g_pCompositor->startCompositor();
 
     g_pCompositor->cleanup();
 
-    Debug::log(LOG, "Hyprland has reached the end.");
+    g_pCompositor.reset();
+
+    Log::logger->log(Log::DEBUG, "Hyprland has reached the end.");
 
     return EXIT_SUCCESS;
 }

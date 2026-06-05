@@ -5,13 +5,13 @@
 class CHyprBorderDecoration : public IHyprWindowDecoration {
   public:
     CHyprBorderDecoration(PHLWINDOW);
-    virtual ~CHyprBorderDecoration();
+    virtual ~CHyprBorderDecoration() = default;
 
     virtual SDecorationPositioningInfo getPositioningInfo();
 
     virtual void                       onPositioningReply(const SDecorationPositioningReply& reply);
 
-    virtual void                       draw(CMonitor*, float a);
+    virtual void                       draw(PHLMONITOR, float const& a);
 
     virtual eDecorationType            getDecorationType();
 
@@ -26,17 +26,14 @@ class CHyprBorderDecoration : public IHyprWindowDecoration {
     virtual std::string                getDisplayName();
 
   private:
-    SBoxExtents  m_seExtents;
-    SBoxExtents  m_seReportedExtents;
+    SBoxExtents  m_extents;
+    SBoxExtents  m_reportedExtents;
 
-    PHLWINDOWREF m_pWindow;
+    PHLWINDOWREF m_window;
 
-    Vector2D     m_vLastWindowPos;
-    Vector2D     m_vLastWindowSize;
+    CBox         m_assignedGeometry = {0};
 
-    CBox         m_bAssignedGeometry = {0};
-
-    int          m_iLastBorderSize = -1;
+    int          m_lastBorderSize = -1;
 
     CBox         assignedBoxGlobal();
     bool         doesntWantBorders();

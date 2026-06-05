@@ -2,22 +2,23 @@
 
 #include "IHyprWindowDecoration.hpp"
 #include "../../devices/IPointer.hpp"
-#include <deque>
+#include <vector>
 #include "../Texture.hpp"
 #include <string>
-#include <memory>
+#include "../../helpers/memory/Memory.hpp"
 
 class CTitleTex {
   public:
     CTitleTex(PHLWINDOW pWindow, const Vector2D& bufferSize, const float monitorScale);
-    ~CTitleTex();
+    ~CTitleTex() = default;
 
-    SP<CTexture> tex;
-    std::string  szContent;
-    int          textWidth;
-    int          textHeight;
+    SP<Render::ITexture> m_texActive;
+    SP<Render::ITexture> m_texInactive;
+    SP<Render::ITexture> m_texLockedActive;
+    SP<Render::ITexture> m_texLockedInactive;
+    std::string          m_content;
 
-    PHLWINDOWREF pWindowOwner;
+    PHLWINDOWREF         m_windowOwner;
 };
 
 void refreshGroupBarGradients();
@@ -25,13 +26,13 @@ void refreshGroupBarGradients();
 class CHyprGroupBarDecoration : public IHyprWindowDecoration {
   public:
     CHyprGroupBarDecoration(PHLWINDOW);
-    virtual ~CHyprGroupBarDecoration();
+    virtual ~CHyprGroupBarDecoration() = default;
 
     virtual SDecorationPositioningInfo getPositioningInfo();
 
     virtual void                       onPositioningReply(const SDecorationPositioningReply& reply);
 
-    virtual void                       draw(CMonitor*, float a);
+    virtual void                       draw(PHLMONITOR, float const& a);
 
     virtual eDecorationType            getDecorationType();
 
@@ -48,29 +49,30 @@ class CHyprGroupBarDecoration : public IHyprWindowDecoration {
     virtual std::string                getDisplayName();
 
   private:
-    SBoxExtents              m_seExtents;
+    CBox                      m_assignedBox = {0};
 
-    CBox                     m_bAssignedBox = {0};
+    PHLWINDOWREF              m_window;
 
-    PHLWINDOWREF             m_pWindow;
+    std::vector<PHLWINDOWREF> m_dwGroupMembers;
 
-    std::deque<PHLWINDOWREF> m_dwGroupMembers;
+    float                     m_barWidth;
+    float                     m_barHeight;
 
-    float                    m_fBarWidth;
-    float                    m_fBarHeight;
+    bool                      m_bLastVisibilityStatus = true;
 
-    CTitleTex*               textureFromTitle(const std::string&);
-    void                     invalidateTextures();
+    CTitleTex*                textureFromTitle(const std::string&);
+    void                      invalidateTextures();
 
-    CBox                     assignedBoxGlobal();
+    CBox                      assignedBoxGlobal();
+    bool                      visible();
 
-    bool                     onBeginWindowDragOnDeco(const Vector2D&);
-    bool                     onEndWindowDragOnDeco(const Vector2D&, PHLWINDOW);
-    bool                     onMouseButtonOnDeco(const Vector2D&, const IPointer::SButtonEvent&);
-    bool                     onScrollOnDeco(const Vector2D&, const IPointer::SAxisEvent);
+    bool                      onBeginWindowDragOnDeco(const Vector2D&);
+    bool                      onEndWindowDragOnDeco(const Vector2D&, PHLWINDOW);
+    bool                      onMouseButtonOnDeco(const Vector2D&, const IPointer::SButtonEvent&);
+    bool                      onScrollOnDeco(const Vector2D&, const IPointer::SAxisEvent);
 
     struct STitleTexs {
         // STitleTexs*                            overriden = nullptr; // TODO: make shit shared in-group to decrease VRAM usage.
-        std::deque<std::unique_ptr<CTitleTex>> titleTexs;
-    } m_sTitleTexs;
+        std::vector<UP<CTitleTex>> titleTexs;
+    } m_titleTexs;
 };

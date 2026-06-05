@@ -1,7 +1,8 @@
 #include "XDGOutput.hpp"
-#include "../Compositor.hpp"
 #include "../config/ConfigValue.hpp"
+#include "../helpers/Monitor.hpp"
 #include "../xwayland/XWayland.hpp"
+#include "../event/EventBus.hpp"
 #include "core/Output.hpp"
 
 #define OUTPUT_MANAGER_VERSION                   3
@@ -13,68 +14,65 @@
 //
 
 void CXDGOutputProtocol::onManagerResourceDestroy(wl_resource* res) {
-    std::erase_if(m_vManagerResources, [&](const auto& other) { return other->resource() == res; });
+    std::erase_if(m_managerResources, [&](const auto& other) { return other->resource() == res; });
 }
 
 void CXDGOutputProtocol::onOutputResourceDestroy(wl_resource* res) {
-    std::erase_if(m_vXDGOutputs, [&](const auto& other) { return other->resource->resource() == res; });
+    std::erase_if(m_xdgOutputs, [&](const auto& other) { return other->m_resource->resource() == res; });
 }
 
 void CXDGOutputProtocol::bindManager(wl_client* client, void* data, uint32_t ver, uint32_t id) {
-    const auto RESOURCE = m_vManagerResources.emplace_back(std::make_unique<CZxdgOutputManagerV1>(client, ver, id)).get();
+    const auto RESOURCE = m_managerResources.emplace_back(makeUnique<CZxdgOutputManagerV1>(client, ver, id)).get();
 
-    if (!RESOURCE->resource()) {
-        LOGM(LOG, "Couldn't bind XDGOutputMgr");
+    if UNLIKELY (!RESOURCE->resource()) {
+        LOGM(Log::DEBUG, "Couldn't bind XDGOutputMgr");
         wl_client_post_no_memory(client);
         return;
     }
 
-    RESOURCE->setDestroy([this](CZxdgOutputManagerV1* res) { this->onManagerResourceDestroy(res->resource()); });
-    RESOURCE->setOnDestroy([this](CZxdgOutputManagerV1* res) { this->onManagerResourceDestroy(res->resource()); });
-    RESOURCE->setGetXdgOutput([this](CZxdgOutputManagerV1* mgr, uint32_t id, wl_resource* output) { this->onManagerGetXDGOutput(mgr, id, output); });
+    RESOURCE->setDestroy([this](CZxdgOutputManagerV1* res) { onManagerResourceDestroy(res->resource()); });
+    RESOURCE->setOnDestroy([this](CZxdgOutputManagerV1* res) { onManagerResourceDestroy(res->resource()); });
+    RESOURCE->setGetXdgOutput([this](CZxdgOutputManagerV1* mgr, uint32_t id, wl_resource* output) { onManagerGetXDGOutput(mgr, id, output); });
 }
 
 CXDGOutputProtocol::CXDGOutputProtocol(const wl_interface* iface, const int& ver, const std::string& name) : IWaylandProtocol(iface, ver, name) {
-    static auto P  = g_pHookSystem->hookDynamic("monitorLayoutChanged", [this](void* self, SCallbackInfo& info, std::any param) { this->updateAllOutputs(); });
-    static auto P2 = g_pHookSystem->hookDynamic("configReloaded", [this](void* self, SCallbackInfo& info, std::any param) { this->updateAllOutputs(); });
-    static auto P3 = g_pHookSystem->hookDynamic("monitorRemoved", [this](void* self, SCallbackInfo& info, std::any param) {
-        const auto PMONITOR = std::any_cast<CMonitor*>(param);
-        for (auto const& o : m_vXDGOutputs) {
-            if (o->monitor == PMONITOR)
-                o->monitor = nullptr;
-        }
-    });
+    static auto P  = Event::bus()->m_events.monitor.layoutChanged.listen([this] { updateAllOutputs(); });
+    static auto P2 = Event::bus()->m_events.config.reloaded.listen([this] { updateAllOutputs(); });
 }
 
 void CXDGOutputProtocol::onManagerGetXDGOutput(CZxdgOutputManagerV1* mgr, uint32_t id, wl_resource* outputResource) {
-    const auto  OUTPUT = CWLOutputResource::fromResource(outputResource);
+    const auto  OUTPUT   = CWLOutputResource::fromResource(outputResource);
+    const auto  PMONITOR = OUTPUT->m_monitor.lock();
+    const auto  CLIENT   = mgr->client();
 
-    const auto  PMONITOR = OUTPUT->monitor.get();
-
-    const auto  CLIENT = mgr->client();
-
-    CXDGOutput* pXDGOutput = m_vXDGOutputs.emplace_back(std::make_unique<CXDGOutput>(makeShared<CZxdgOutputV1>(CLIENT, mgr->version(), id), PMONITOR)).get();
+    CXDGOutput* pXDGOutput = m_xdgOutputs.emplace_back(makeUnique<CXDGOutput>(makeShared<CZxdgOutputV1>(CLIENT, mgr->version(), id), PMONITOR)).get();
 #ifndef NO_XWAYLAND
-    if (g_pXWayland && g_pXWayland->pServer && g_pXWayland->pServer->xwaylandClient == CLIENT)
-        pXDGOutput->isXWayland = true;
+    if (g_pXWayland && g_pXWayland->m_server && g_pXWayland->m_server->m_xwaylandClient == CLIENT)
+        pXDGOutput->m_isXWayland = true;
 #endif
-    pXDGOutput->client = CLIENT;
+    pXDGOutput->m_client = CLIENT;
 
-    if (!pXDGOutput->resource->resource()) {
-        m_vXDGOutputs.pop_back();
+    pXDGOutput->m_outputProto = OUTPUT->m_owner;
+
+    if UNLIKELY (!pXDGOutput->m_resource->resource()) {
+        m_xdgOutputs.pop_back();
         mgr->noMemory();
         return;
     }
 
-    if (!PMONITOR)
+    if UNLIKELY (!PMONITOR) {
+        LOGM(Log::ERR, "New xdg_output from client {:x} ({}) has no CMonitor?!", (uintptr_t)CLIENT, pXDGOutput->m_isXWayland ? "xwayland" : "not xwayland");
         return;
+    }
 
-    const auto XDGVER = pXDGOutput->resource->version();
+    LOGM(Log::DEBUG, "New xdg_output for {}: client {:x} ({})", PMONITOR->m_name, (uintptr_t)CLIENT, pXDGOutput->m_isXWayland ? "xwayland" : "not xwayland");
+
+    const auto XDGVER = pXDGOutput->m_resource->version();
 
     if (XDGVER >= OUTPUT_NAME_SINCE_VERSION)
-        pXDGOutput->resource->sendName(PMONITOR->szName.c_str());
-    if (XDGVER >= OUTPUT_DESCRIPTION_SINCE_VERSION && !PMONITOR->output->description.empty())
-        pXDGOutput->resource->sendDescription(PMONITOR->output->description.c_str());
+        pXDGOutput->m_resource->sendName(PMONITOR->m_name.c_str());
+    if (XDGVER >= OUTPUT_DESCRIPTION_SINCE_VERSION && !PMONITOR->m_output->description.empty())
+        pXDGOutput->m_resource->sendDescription(PMONITOR->m_output->description.c_str());
 
     pXDGOutput->sendDetails();
 
@@ -84,41 +82,42 @@ void CXDGOutputProtocol::onManagerGetXDGOutput(CZxdgOutputManagerV1* mgr, uint32
 }
 
 void CXDGOutputProtocol::updateAllOutputs() {
-    for (auto const& o : m_vXDGOutputs) {
+    LOGM(Log::DEBUG, "updating all xdg_output heads");
 
-        if (!o->monitor)
+    for (auto const& o : m_xdgOutputs) {
+        if (!o->m_monitor)
             continue;
 
         o->sendDetails();
 
-        o->monitor->scheduleDone();
+        o->m_monitor->scheduleDone();
     }
 }
 
 //
 
-CXDGOutput::CXDGOutput(SP<CZxdgOutputV1> resource_, CMonitor* monitor_) : monitor(monitor_), resource(resource_) {
-    if (!resource->resource())
+CXDGOutput::CXDGOutput(SP<CZxdgOutputV1> resource_, PHLMONITOR monitor_) : m_monitor(monitor_), m_resource(resource_) {
+    if UNLIKELY (!m_resource->resource())
         return;
 
-    resource->setDestroy([](CZxdgOutputV1* pMgr) { PROTO::xdgOutput->onOutputResourceDestroy(pMgr->resource()); });
-    resource->setOnDestroy([](CZxdgOutputV1* pMgr) { PROTO::xdgOutput->onOutputResourceDestroy(pMgr->resource()); });
+    m_resource->setDestroy([](CZxdgOutputV1* pMgr) { PROTO::xdgOutput->onOutputResourceDestroy(pMgr->resource()); });
+    m_resource->setOnDestroy([](CZxdgOutputV1* pMgr) { PROTO::xdgOutput->onOutputResourceDestroy(pMgr->resource()); });
 }
 
 void CXDGOutput::sendDetails() {
-    static auto PXWLFORCESCALEZERO = CConfigValue<Hyprlang::INT>("xwayland:force_zero_scaling");
+    static auto PXWLFORCESCALEZERO = CConfigValue<Config::INTEGER>("xwayland:force_zero_scaling");
 
-    if (!monitor)
+    if UNLIKELY (!m_monitor || !m_outputProto || m_outputProto->isDefunct())
         return;
 
-    const auto POS = isXWayland ? monitor->vecXWaylandPosition : monitor->vecPosition;
-    resource->sendLogicalPosition(POS.x, POS.y);
+    const auto POS = m_isXWayland ? m_monitor->m_xwaylandPosition : m_monitor->m_position;
+    m_resource->sendLogicalPosition(POS.x, POS.y);
 
-    if (*PXWLFORCESCALEZERO && isXWayland)
-        resource->sendLogicalSize(monitor->vecTransformedSize.x, monitor->vecTransformedSize.y);
+    if (*PXWLFORCESCALEZERO && m_isXWayland)
+        m_resource->sendLogicalSize(m_monitor->m_transformedSize.x, m_monitor->m_transformedSize.y);
     else
-        resource->sendLogicalSize(monitor->vecSize.x, monitor->vecSize.y);
+        m_resource->sendLogicalSize(m_monitor->m_size.x, m_monitor->m_size.y);
 
-    if (resource->version() < OUTPUT_DONE_DEPRECATED_SINCE_VERSION)
-        resource->sendDone();
+    if (m_resource->version() < OUTPUT_DONE_DEPRECATED_SINCE_VERSION)
+        m_resource->sendDone();
 }
